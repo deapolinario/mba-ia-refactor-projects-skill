@@ -1,0 +1,23 @@
+# Environment variables (NUNCA commitar)
+.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+*.sqlite
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

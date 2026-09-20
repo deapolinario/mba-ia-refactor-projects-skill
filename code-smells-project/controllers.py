@@ -1,6 +1,14 @@
 from flask import request, jsonify
 import models
 from database import get_db
+import logging
+
+logger = logging.getLogger(__name__)
+
+def mask_email(email):
+    """Mascarar email para logs"""
+    parts = email.split('@')
+    return f"{parts[0][:2]}***@{parts[1]}"
 
 def listar_produtos():
     try:
@@ -158,7 +166,7 @@ def criar_usuario():
             return jsonify({"erro": "Nome, email e senha são obrigatórios"}), 400
 
         id = models.criar_usuario(nome, email, senha)
-        print("Usuário criado: " + email)
+        logger.info(f"Usuário criado: {id}")
         return jsonify({"dados": {"id": id}, "sucesso": True}), 201
 
     except Exception as e:
@@ -175,11 +183,10 @@ def login():
 
         usuario = models.login_usuario(email, senha)
         if usuario:
-
-            print("Login bem-sucedido: " + email)
+            logger.info(f"Login bem-sucedido: {mask_email(email)}")
             return jsonify({"dados": usuario, "sucesso": True, "mensagem": "Login OK"}), 200
         else:
-            print("Login falhou: " + email)
+            logger.warning(f"Login falhou: {mask_email(email)}")
             return jsonify({"erro": "Email ou senha inválidos", "sucesso": False}), 401
 
     except Exception as e:
@@ -205,9 +212,8 @@ def criar_pedido():
         if "erro" in resultado:
             return jsonify({"erro": resultado["erro"], "sucesso": False}), 400
 
-        print("ENVIANDO EMAIL: Pedido " + str(resultado["pedido_id"]) + " criado para usuario " + str(usuario_id))
-        print("ENVIANDO SMS: Seu pedido foi recebido!")
-        print("ENVIANDO PUSH: Novo pedido recebido pelo sistema")
+        logger.info(f"Pedido criado: {resultado['pedido_id']}")
+        logger.debug("ENVIANDO NOTIFICAÇÕES (EMAIL, SMS, PUSH)")
 
         return jsonify({
             "dados": resultado,
@@ -245,9 +251,9 @@ def atualizar_status_pedido(pedido_id):
         models.atualizar_status_pedido(pedido_id, novo_status)
 
         if novo_status == "aprovado":
-            print("NOTIFICAÇÃO: Pedido " + str(pedido_id) + " foi aprovado! Preparar envio.")
+            logger.info(f"Pedido {pedido_id} aprovado")
         if novo_status == "cancelado":
-            print("NOTIFICAÇÃO: Pedido " + str(pedido_id) + " cancelado. Devolver estoque.")
+            logger.info(f"Pedido {pedido_id} cancelado")
 
         return jsonify({"sucesso": True, "mensagem": "Status atualizado"}), 200
 
@@ -281,12 +287,7 @@ def health_check():
                 "usuarios": usuarios,
                 "pedidos": pedidos
             },
-
-            "versao": "1.0.0",
-            "ambiente": "producao",
-            "db_path": "loja.db",
-            "debug": True,
-            "secret_key": "minha-chave-super-secreta-123"
+            "versao": "1.0.0"
         }), 200
     except Exception as e:
-        return jsonify({"status": "erro", "detalhes": str(e)}), 500
+        return jsonify({"status": "erro"}), 500

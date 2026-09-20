@@ -2,10 +2,12 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 import controllers
 from database import get_db
+from config import Config
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "minha-chave-super-secreta-123"
-app.config["DEBUG"] = True
+app.config.from_object(Config)
+Config.validate()
+
 CORS(app)
 
 app.add_url_rule("/produtos", "listar_produtos", controllers.listar_produtos, methods=["GET"])
