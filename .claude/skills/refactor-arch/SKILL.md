@@ -136,6 +136,10 @@ Total findings: X (X CRITICAL, X HIGH)
    **CRITICAL - God Classes:**
    - Separar em `models/`, `routes/`, `controllers/`
    - Cada arquivo com uma responsabilidade clara
+   - Seguir guia passo-a-passo: `mvc-refactoring-guide.md`
+   - Models: apenas queries
+   - Routes: apenas HTTP mapping
+   - Controllers: validação + lógica de negócio
 
    **HIGH - Weak Password Hashing:**
    - Substituir MD5/SHA1 por bcrypt ou argon2
@@ -203,7 +207,8 @@ Validation:
 - `anti-patterns-catalog.md` → Catálogo de problemas
 - `audit-report-template.md` → Formato de relatório
 - `refactoring-playbook.md` → Padrões de transformação
-- `architecture-guidelines.md` → Guidelines MVC
+- `architecture-guidelines.md` → Guidelines MVC (visão geral)
+- `mvc-refactoring-guide.md` → Guia passo-a-passo (Phase 3) **v2.2**
 
 ---
 
