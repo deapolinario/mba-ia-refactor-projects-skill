@@ -373,6 +373,175 @@ if __name__ == '__main__':
 
 ---
 
+---
+
+### Padrão 9: Remover Secrets de Responses
+
+**Problema:**
+```python
+@app.route('/health')
+def health_check():
+    return jsonify({
+        "status": "ok",
+        "secret_key": SECRET_KEY,  # ❌ EXPÕE!
+        "debug": DEBUG
+    })
+```
+
+**Solução:**
+```python
+@app.route('/health')
+def health_check():
+    return jsonify({
+        "status": "ok",
+        "version": "1.0.0"
+        # ✅ Sem secrets
+    })
+```
+
+---
+
+### Padrão 10: Mascarar Dados Sensíveis em Logs
+
+**Problema:**
+```python
+# Python
+print(f"Email registrado: {email}")
+print(f"Cartão: {cc}")
+
+# Node.js
+console.log(`Processando cartão: ${cc}`);
+```
+
+**Solução:**
+```python
+# Python
+def mask_email(email):
+    parts = email.split('@')
+    return f"{parts[0][:2]}***@{parts[1]}"
+
+def mask_cc(cc):
+    return cc[:4] + '*' * (len(cc) - 8) + cc[-4:]
+
+print(f"Email: {mask_email(email)}")
+print(f"Cartão: {mask_cc(cc)}")
+```
+
+```javascript
+// Node.js
+function maskEmail(email) {
+    const parts = email.split('@');
+    return `${parts[0].slice(0, 2)}***@${parts[1]}`;
+}
+
+function maskCC(cc) {
+    return cc.slice(0, 4) + '*'.repeat(cc.length - 8) + cc.slice(-4);
+}
+
+console.log(`Email: ${maskEmail(email)}`);
+console.log(`Cartão: ${maskCC(cc)}`);
+```
+
+---
+
+### Padrão 11: Converter Global State para Singleton
+
+**Problema:**
+```python
+# Global compartilhado
+db_connection = None
+
+def get_db():
+    global db_connection
+    if db_connection is None:
+        db_connection = sqlite3.connect(db_path, check_same_thread=False)
+    return db_connection
+```
+
+**Solução:**
+```python
+# Singleton thread-safe
+class DatabaseManager:
+    _instance = None
+    _lock = threading.Lock()
+    
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+    
+    def __init__(self):
+        if self._initialized:
+            return
+        self.connection = sqlite3.connect(
+            db_path,
+            check_same_thread=False,
+            timeout=5
+        )
+        self._initialized = True
+
+# Uso
+db = DatabaseManager()
+```
+
+---
+
+### Padrão 12: Extrair Magic Strings para Config
+
+**Problema:**
+```python
+# Hardcoded categories
+categorias_validas = ["informatica", "moveis", "vestuario", "geral"]
+
+# Magic numbers
+timeout = 30
+max_retries = 3
+```
+
+**Solução:**
+```python
+# config.py
+class Config:
+    VALID_CATEGORIES = [
+        "informatica",
+        "moveis", 
+        "vestuario",
+        "geral"
+    ]
+    REQUEST_TIMEOUT = 30
+    MAX_RETRIES = 3
+    
+# controllers.py
+from config import Config
+
+if categoria not in Config.VALID_CATEGORIES:
+    return jsonify({"erro": "Categoria inválida"}), 400
+```
+
+---
+
+### Padrão 13: Simplificar Ternários
+
+**Problema:**
+```python
+def is_admin(self):
+    if self.role == 'admin':
+        return True
+    else:
+        return False
+```
+
+**Solução:**
+```python
+def is_admin(self):
+    return self.role == 'admin'
+```
+
+---
+
 ## Validação Pós-Refatoração
 
 Após aplicar cada padrão, validar:

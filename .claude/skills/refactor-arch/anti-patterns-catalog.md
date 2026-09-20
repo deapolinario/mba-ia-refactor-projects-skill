@@ -139,6 +139,102 @@
 
 ---
 
+---
+
+### 8. Secrets Expostas em Responses (MEDIUM)
+
+**Descrição:** Endpoints públicos retornam dados sensíveis em responses HTTP.
+
+**Sinais de Detecção:**
+- `return jsonify()` ou `res.json()` contendo `SECRET_KEY`, `PASSWORD`, `API_KEY`
+- Endpoints como `/health`, `/status`, `/info` retornando secrets
+- Debug info em respostas de erro
+
+**Padrão Seguro:**
+- Retornar apenas dados não-sensíveis
+- Manter secrets fora de responses
+
+**Impacto:** Information disclosure, exposição em logs/monitoramento
+
+---
+
+### 9. Logs Sensíveis (PII Exposure) (MEDIUM)
+
+**Descrição:** Logs contêm dados sensíveis como emails, cartões, CPF.
+
+**Sinais de Detecção:**
+- `print()`, `console.log()`, `logger.*()` com variáveis
+- Pattern de email: `\w+@\w+\.\w+`
+- Pattern de cartão: `\d{16}` ou `\d{13}`
+- Pattern de CPF/SSN: `\d{3}\.\d{3}\.\d{3}-\d{2}`
+
+**Padrão Seguro:**
+- Mascarar dados sensíveis antes de logar
+- Usar `mask_email()`, `mask_cc()`, etc
+
+**Impacto:** PII exposure, LGPD/GDPR violation
+
+---
+
+### 10. Global State Mutável (HIGH)
+
+**Descrição:** Variáveis globais compartilhadas entre requests causam race conditions.
+
+**Sinais de Detecção:**
+- `global` keyword
+- Variáveis no module level sem capitalização
+- `check_same_thread=False` em SQLite
+- Mutação de variáveis globais
+
+**Padrão Seguro:**
+- Usar Singleton pattern
+- Usar Dependency Injection
+- Request-scoped state (Flask: `g`, Express: `req`)
+
+**Impacto:** Race conditions, dados corrompidos, vazamento entre usuários
+
+---
+
+### 11. Magic Strings / Magic Numbers (LOW)
+
+**Descrição:** Valores hardcoded sem constantes nomeadas.
+
+**Sinais de Detecção:**
+- Listas/dicts hardcoded com múltiplos valores
+- Status codes hardcoded (200, 404, 500)
+- Strings sem variáveis de config
+- Números sem explicação (timeouts, limits)
+
+**Padrão Seguro:**
+- Extrair para Config/Enum
+- Usar constantes nomeadas
+- Centralizar em um arquivo de config
+
+**Impacto:** Manutenibilidade, inconsistência
+
+---
+
+### 12. Ternários Desnecessários (LOW)
+
+**Descrição:** If/else que retorna True/False poderia ser uma expressão.
+
+**Sinais de Detecção:**
+```
+if <condition>:
+    return True
+else:
+    return False
+```
+
+**Padrão Seguro:**
+```
+return <condition>
+```
+
+**Impacto:** Legibilidade
+
+---
+
 ## Formato de Detecção (Agnóstico de Linguagem)
 
 Cada anti-pattern é procurado por padrões independentes de linguagem:

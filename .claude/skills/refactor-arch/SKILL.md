@@ -1,8 +1,8 @@
 # Skill: Refactor Architecture
 
-**Versão:** 2.0 (SQL Injection + Secrets + Hash Fraco + God Classes + N+1 + Duplicação + MVC)
+**Versão:** 2.1 (7 CRITICAL/HIGH + 5 MEDIUM/LOW anti-patterns)
 
-**Objetivo:** Analisar, auditar e refatorar projetos legados para o padrão MVC, eliminando vulnerabilidades críticas e problemas arquiteturais.
+**Objetivo:** Analisar, auditar e refatorar projetos legados para o padrão MVC, eliminando vulnerabilidades críticas, problemas arquiteturais e code smells.
 
 ---
 
@@ -51,12 +51,26 @@ DB tables:      [LISTA]
 **Instruções:**
 
 1. Escanear **todos os arquivos** do projeto procurando por:
+   
+   **CRITICAL:**
    - SQL Injection (string concatenation em queries)
    - Hardcoded Secrets (SECRET_KEY, PASSWORD, API_KEY, etc)
-   - Weak Password Hashing (MD5, SHA1, sem hash)
-   - God Classes (arquivos 300+ linhas, múltiplas responsabilidades)
-   - N+1 Queries (loops com queries dentro)
-   - Code Duplication (blocos de código idênticos)
+   - Senhas em Texto Plano
+   
+   **HIGH:**
+   - Weak Password Hashing (MD5, SHA1)
+   - God Classes (arquivos 300+ linhas)
+   - N+1 Queries (loops com queries)
+   - Global State Mutável (race conditions)
+   
+   **MEDIUM:**
+   - Code Duplication
+   - Secrets Expostas em Responses
+   - Logs Sensíveis (PII exposure)
+   
+   **LOW:**
+   - Magic Strings / Magic Numbers
+   - Ternários Desnecessários
    - Monolithic Architecture (sem separação models/routes/controllers)
 
 2. Para cada achado:
@@ -203,30 +217,48 @@ Validation:
 
 ---
 
-## Limitações v2.0
+## Limitações v2.1
 
 - Suporte oficialmente para Python + Node.js (heurísticas agnósticas)
-- Detecção de duplicação é heurística (pode ter falsos positivos)
+- Detecção de padrões é baseada em regex (pode ter falsos positivos)
 - Refatoração MVC assume estrutura simples (monolito → camadas)
 - Validação de endpoints é básica (apenas startup + sintaxe)
 - Não trata bancos de dados não-SQL ou ORMs customizados
 
 ---
 
-## O Que v2.0 Cobre
+## O Que v2.1 Cobre
 
-✅ SQL Injection
-✅ Hardcoded Secrets
-✅ Weak Password Hashing (MD5, SHA1)
-✅ God Classes/Modules
-✅ N+1 Queries
-✅ Code Duplication
-✅ Monolithic → MVC Refactoring
+✅ **CRITICAL:**
+- SQL Injection
+- Hardcoded Secrets
+- Senhas em Texto Plano
+- Endpoints Perigosos
+
+✅ **HIGH:**
+- Weak Password Hashing (MD5, SHA1)
+- God Classes/Modules
+- N+1 Queries
+- Global State Mutável
+- Data Integrity Issues
+
+✅ **MEDIUM:**
+- Code Duplication
+- Secrets Expostas em Responses
+- Logs Sensíveis (PII)
+- DEBUG Mode Ativo
+
+✅ **LOW:**
+- Magic Strings / Magic Numbers
+- Ternários Desnecessários
+
+✅ **ARCHITECTURE:**
+- Monolithic → MVC Refactoring
 
 ---
 
 ## Próximas Versões
 
-v2.1: Detecção de APIs deprecated
-v2.2: Validação de endpoints completa
+v2.2: Detecção de APIs deprecated e code smell patterns
 v3.0: Suporte para microserviços e arquiteturas distribuídas
+v3.1: Validação de endpoints completa
