@@ -1,6 +1,6 @@
 # Refactor Architecture — Skill de Auditoria e Refatoração Automatizada
 
-Skill `refactor-arch` para Claude Code que analisa, audita e refatora codebases legadas para o padrão MVC, de forma agnóstica de tecnologia. Testada e validada em 3 projetos reais (2x Python/Flask, 1x Node.js/Express), com correção completa aplicada e commitada nos 3.
+Skill `refactor-arch` para Claude Code que analisa, audita e refatora codebases legadas para o padrão MVC, de forma agnóstica de tecnologia. Testada e validada em 3 projetos reais (2x Python/Flask, 1x Node.js/Express), com correção completa aplicada, commitada e **confirmada por reauditoria final independente com 0 achados nos 3** (v3.1, incluindo teste funcional de autorização).
 
 > Este é o enunciado original do desafio: [`README_enunciado.md`](README_enunciado.md).
 
@@ -147,7 +147,7 @@ Os 3 relatórios batem com (e superam) o mínimo de 5 findings e pelo menos 1 CR
 
 | Projeto | Antes | Depois |
 |---|---|---|
-| **1 — code-smells-project** | 4 arquivos (`app.py`, `controllers.py`, `models.py`, `database.py`), monolítico, sem `config` | 16 arquivos em MVC: `app.py` (entry point), `config.py`, `database.py` (Singleton), `models/{produto,usuario,pedido}.py`, `controllers/{produto,usuario,pedido}_controller.py`, `routes/{produto,usuario,pedido,health}_routes.py` |
+| **1 — code-smells-project** | 4 arquivos (`app.py`, `controllers.py`, `models.py`, `database.py`), monolítico, sem `config` | 17 arquivos em MVC: `app.py` (entry point), `config.py`, `database.py` (Singleton), `auth.py` (decorators `login_required`/`role_required`/`owner_or_role_required`, adicionado na correção v3.1 de broken access control), `models/{produto,usuario,pedido}.py`, `controllers/{produto,usuario,pedido}_controller.py`, `routes/{produto,usuario,pedido,health}_routes.py` |
 | **2 — ecommerce-api-legacy** | 3 arquivos (`app.js`, `AppManager.js` — 142 linhas de God Class, `utils.js`), callback hell | 17 arquivos em MVC: `app.js`, `config.js`, `database.js` (Promise wrapper), `middleware/auth.js`, `models/{course,user,enrollment,payment,auditLog,report}.js`, `controllers/{checkout,report,user}Controller.js`, `routes/{checkout,report,user}Routes.js`, `utils/mask.js` |
 | **3 — task-manager-api** | 15 arquivos parcialmente organizados (`models/`, `routes/` já existiam, mas sem `controllers/`; toda validação/lógica de negócio direto nas rotas) | 27 arquivos com camada de controllers adicionada, autenticação real (token assinado + `login_required`/`role_required`), N+1 eliminado, e um bug de autorização granular corrigido: `auth/tokens.py`, `middleware/auth.py`, `controllers/{auth,task,user,category,report}_controller.py`, `routes/category_routes.py` (nova, separada de `report_routes.py`) |
 
@@ -213,6 +213,18 @@ POST /users {"role": "admin", ...} (cadastro público) -> 201, role retornado: '
 - **Python/Flask (projetos 1 e 3):** a skill lidou bem tanto com o monolito completo (projeto 1, 4 arquivos) quanto com a estrutura parcial (projeto 3, já com `models/`/`routes/`), mas precisou de instruções específicas na Fase 3 para não assumir "sempre criar do zero" — no projeto 3 a tarefa foi inserir uma camada de `controllers/` que não existia, preservando o que já estava organizado.
 - **Node.js/Express (projeto 2):** os mesmos anti-patterns (SQL injection, secrets, N+1) precisaram de refatorações com sintaxe/idioma diferente (Promises em vez de exceções Python, `LEFT JOIN` via query builder em vez de SQLAlchemy `joinedload`), mas a **lógica de detecção e a estrutura MVC alvo foram as mesmas** — confirmando o agnosticismo pretendido.
 - **Achado mais valioso do processo:** o Self-Verification Loop (v3.0/v3.1) encontrou, ele mesmo, achados que a primeira versão da Fase 3 tinha deixado passar em todos os 3 projetos — uma regressão de performance introduzida pelo próprio refactor (projeto 1), um N+1 residual fora do escopo original (projeto 1), configuração morta copiada do código legado (projeto 2) e uma falha de escalação de privilégio (projeto 3). Isso indicou que "a skill terminou de refatorar" não é o mesmo que "a skill confirmou que o resultado está correto" — e motivou tornar a reauditoria uma etapa obrigatória, não um passo opcional.
+
+### Confirmação Final (Reauditoria Completa Pós-v3.1)
+
+Além do Self-Verification Loop embutido na Fase 3 (que já fechou em 0 achados ao final de cada refatoração), os 3 projetos foram submetidos a uma **reauditoria completa e independente**, com a skill `/refactor-arch` reinvocada do zero — relendo todo o código-fonte sem confiar em nenhum log de rodada anterior — contra os 19 anti-patterns do catálogo v3.1 e o teste funcional obrigatório de autorização (Padrão 19):
+
+| Projeto | Relatório final | CRITICAL | HIGH | MEDIUM | LOW | Teste funcional de autorização |
+|---|---|---|---|---|---|---|
+| 1 — code-smells-project | `audit-code-smells-project-2026-09-20T16-00-05.md` | 0 | 0 | 0 | 0 | 29 asserções simuladas (anônimo/cliente/admin) — 29 PASS |
+| 2 — ecommerce-api-legacy | `audit-ecommerce-api-legacy-2026-09-20T19-03-12.md` | 0 | 0 | 0 | 0 | 6 asserções (incl. injeção de `role`/`is_admin`/`price` no payload) — 6 PASS |
+| 3 — task-manager-api | `audit-task-manager-api-2026-09-20T18-57-12.md` | 0 | 0 | 0 | 0 | 7 asserções (auto-promoção, edição de outro usuário, rotas admin-only) — 7 PASS |
+
+Nenhum dos 3 relatórios finais encontrou achado novo ou regressão. O relatório do projeto 3 registra ainda uma nota informativa (não classificada como achado): `TaskController` permite editar/excluir tasks de outro usuário sem checagem de propriedade — mantido de propósito, pois o domínio é um quadro de tarefas compartilhado (não há regra de "só posso editar minhas próprias tasks" no seed/README do projeto), diferente de `User`, que é sempre pessoal. Fica sinalizado para uma decisão de produto futura, não como bug.
 
 ---
 
