@@ -1,10 +1,12 @@
 # Skill: Refactor Architecture
 
-**Versão:** 2.2 (18 anti-patterns: CRITICAL/HIGH/MEDIUM/LOW + validação de regressão)
+**Versão:** 3.0 (18 anti-patterns + validação de regressão + self-verification loop)
 
 **Objetivo:** Analisar, auditar e refatorar projetos legados para o padrão MVC, eliminando vulnerabilidades críticas, problemas arquiteturais e code smells.
 
 **Mudança de princípio em v2.2:** a Fase 3 deixa de ser **seletiva** (só tratar os achados "principais") e passa a ser **sistemática** — TODO achado listado na Fase 2 deve ser resolvido ou explicitamente marcado como "adiado para próxima versão" no output, nunca silenciosamente ignorado.
+
+**Mudança de princípio em v3.0:** a Fase 3 deixa de confiar no próprio log de refatoração como prova de sucesso. Ao final, ela **se reaudita** — relê o código já refatorado do zero e roda a checklist de 18 anti-patterns de novo, exatamente como faria uma Fase 2 nova. Isso existe porque, na prática, essa reauditoria pegou coisas reais que o log de refatoração não pegava: uma regressão introduzida pela própria refatoração (setup de banco rodando por-request), um N+1 residual que sobrou fora do escopo original corrigido, e configuração morta copiada do código legado sem verificar se tinha uso. Se a reauditoria vier limpa, a skill encerra. Se encontrar algo, ela **pergunta ao usuário se deve continuar corrigindo** — nunca decide isso por conta própria — e, se autorizada, repete o ciclo (corrigir → validar → reauditar) até ficar limpo ou até um limite de 3 ciclos.
 
 ---
 
@@ -122,9 +124,9 @@ Total findings: X (X CRITICAL, X HIGH)
 
 ---
 
-### Fase 3: Refactoring & Validation
+### Fase 3: Refactoring, Validation & Self-Verification
 
-**Objetivo:** Aplicar refatorações e validar que a aplicação continua funcionando.
+**Objetivo:** Aplicar refatorações, validar que a aplicação continua funcionando, e **se reauditar** antes de declarar sucesso.
 
 **Instruções:**
 
@@ -199,11 +201,11 @@ Total findings: X (X CRITICAL, X HIGH)
    - Se possível, testar alguns endpoints chave
    - Reexecutar mentalmente a Fase 2 sobre o código final e confirmar que cada achado da checklist do passo 1 está de fato resolvido (não confiar em "deveria estar corrigido")
 
-6. Imprimir output de validação, incluindo a checklist completa de achados com status individual:
+6. Imprimir output de validação, incluindo a checklist completa de achados com status individual. **Este output é intermediário** — o status final só é declarado depois do passo 7 (self-verification):
 
 ```
 ================================
-PHASE 3: REFACTORING COMPLETE
+PHASE 3: REFACTORING APPLIED (pendente self-verification — ver passo 7)
 ================================
 
 Findings checklist (todos os achados da Fase 2, sem exceção):
@@ -244,6 +246,45 @@ Validation:
 ================================
 ```
 
+7. **Self-Verification Loop (v3.0, obrigatório, roda sempre que a Fase 3 for executada):**
+
+   a. **Reler o código do zero.** Ler novamente todos os arquivos atuais do projeto (não os arquivos "que deveriam ter sido alterados" — o conjunto completo), exatamente como se fosse uma Fase 2 nova sendo executada por alguém sem acesso ao log de refatoração desta sessão. Não aceitar o checklist do passo 6 como prova — ele documenta intenção, a releitura confirma resultado.
+
+   b. **Rodar a checklist completa dos 18 anti-patterns** (`anti-patterns-catalog.md`) contra esse código. Isso inclui padrões fora do escopo dos achados originais da Fase 2 — a reauditoria pode (e deve) encontrar coisas novas, incluindo regressões introduzidas pela própria refatoração deste ciclo.
+
+   c. **Gerar um novo relatório de auditoria**, com timestamp novo, seguindo o mesmo padrão de nomenclatura da Fase 2 (`../reports/audit-{repo-name}-{timestamp}.md`).
+
+   d. **Se 0 achados:** imprimir confirmação e encerrar o fluxo — não perguntar nada, a Fase 3 terminou com sucesso.
+
+   ```
+   ================================
+   PHASE 3: SELF-VERIFICATION — CYCLE [N]
+   ================================
+   Re-read: [X] files
+   Findings: 0
+   Status: ✅ Clean — no further action needed
+   ================================
+   ```
+
+   e. **Se houver 1+ achados:** imprimir a lista (severidade + resumo de cada um) e perguntar explicitamente ao usuário — nunca decidir por conta própria:
+
+   ```
+   ================================
+   PHASE 3: SELF-VERIFICATION — CYCLE [N]
+   ================================
+   Re-read: [X] files
+   Findings: [Y] ([lista: severidade + descrição curta de cada achado])
+
+   **Deseja que eu continue corrigindo? (y/n)**
+   ================================
+   ```
+
+   f. Se `y`/`yes`: voltar ao passo 2 desta Fase 3, tratando **apenas os achados encontrados neste ciclo** (não repetir o que já foi corrigido), e repetir o processo completo — refatorar → validar → self-verification (passo 7) — incrementando o contador de ciclo.
+
+   g. Se `n`/`no`: parar. Reportar o estado final deixando explícito quais achados ficaram pendentes por decisão do usuário (não por limitação da skill).
+
+   h. **Limite de segurança: máximo 3 ciclos.** Se ao final do 3º ciclo ainda houver achados, parar automaticamente **sem perguntar de novo**, reportar os achados remanescentes e recomendar revisão manual — evita loop infinito em casos onde a correção de um achado introduz outro indefinidamente.
+
 ---
 
 ## Referências Carregadas
@@ -266,10 +307,12 @@ Validation:
 5. **Validadora:** Testar que a aplicação continua funcionando
 6. **Sistemática (v2.2):** Fase 3 trata TODOS os achados da checklist, nunca seletivamente — item adiado precisa de justificativa explícita no output
 7. **Auto-crítica (v2.2):** Fase 3 sempre roda o Checklist de Regressão antes de declarar sucesso, para pegar bugs introduzidos pela própria refatoração (ex: setup que passou a rodar por-request, config criada mas não aplicada)
+8. **Auto-verificadora (v3.0):** Fase 3 nunca termina só porque o checklist de intenção está todo `✅` — ela relê o código do zero e reaplica a Fase 2 sobre o resultado antes de declarar sucesso
+9. **Nunca decide sozinha continuar corrigindo (v3.0):** se a self-verification encontra achados, a skill pergunta ao usuário — só continua o ciclo com `y`/`yes` explícito, e para automaticamente no limite de 3 ciclos independente da resposta
 
 ---
 
-## Limitações v2.2
+## Limitações v3.0
 
 - Suporte oficialmente para Python + Node.js (heurísticas agnósticas)
 - Detecção de padrões é baseada em regex/heurística estrutural (pode ter falsos positivos)
@@ -277,10 +320,12 @@ Validation:
 - Validação de endpoints é básica (apenas startup + sintaxe), sem testes automatizados de request/response
 - Não trata bancos de dados não-SQL ou ORMs customizados
 - Auth adicionada em endpoints administrativos é um guard mínimo (token), não um sistema de autenticação completo
+- Self-verification loop tem limite fixo de 3 ciclos — projetos com achados encadeados profundos (fix de A introduz B, fix de B introduz C, ...) podem precisar de revisão manual após o limite
+- Cada ciclo relê o projeto inteiro — em projetos grandes isso tem custo (tempo/tokens) proporcional ao tamanho, não incremental
 
 ---
 
-## O Que v2.2 Cobre
+## O Que v3.0 Cobre
 
 ✅ **CRITICAL:**
 - SQL Injection
@@ -315,11 +360,14 @@ Validation:
 ✅ **PROCESSO:**
 - Checklist sistemática de achados (Fase 3 não pula itens silenciosamente)
 - Checklist de regressão pós-refactoring
+- **Self-verification loop:** Fase 3 se reaudita relendo o código do zero e reaplicando os 18 anti-patterns, ao invés de confiar no próprio log de refatoração
+- **Loop com controle do usuário:** achados na reauditoria nunca são corrigidos automaticamente — a skill pergunta e só continua com `y`/`yes` explícito
+- **Limite de segurança:** máximo 3 ciclos de correção↔reauditoria, evitando loop infinito
 
 ---
 
 ## Próximas Versões
 
-v2.3: Testes automatizados de request/response (não só sintaxe) na validação da Fase 3
-v3.0: Suporte para microserviços e arquiteturas distribuídas
-v3.1: Sistema de autenticação completo (não só guard de token) no MVC guide
+v3.1: Testes automatizados de request/response (não só sintaxe) na validação da Fase 3
+v3.2: Sistema de autenticação completo (não só guard de token) no MVC guide
+v4.0: Suporte para microserviços e arquiteturas distribuídas
