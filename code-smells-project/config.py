@@ -9,6 +9,9 @@ class Config:
     # Database
     DATABASE_PATH = os.getenv('DATABASE_PATH', 'loja.db')
 
+    # Admin (guard mínimo para rotas administrativas — v2.2)
+    ADMIN_TOKEN = os.getenv('ADMIN_TOKEN')
+
     # Flask
     DEBUG = os.getenv('FLASK_ENV') == 'development'
 

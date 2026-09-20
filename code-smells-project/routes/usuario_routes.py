@@ -1,12 +1,14 @@
 import logging
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, session
 from controllers.usuario_controller import UsuarioController
+from auth import role_required, owner_or_role_required
 
 logger = logging.getLogger(__name__)
 usuario_bp = Blueprint('usuarios', __name__)
 
 
 @usuario_bp.route('/usuarios', methods=['GET'])
+@role_required('admin')
 def listar_usuarios():
     try:
         usuarios = UsuarioController.listar()
@@ -17,6 +19,7 @@ def listar_usuarios():
 
 
 @usuario_bp.route('/usuarios/<int:id>', methods=['GET'])
+@owner_or_role_required('id', 'admin')
 def buscar_usuario(id):
     try:
         usuario = UsuarioController.buscar_por_id(id)
@@ -46,6 +49,8 @@ def login():
     try:
         dados = request.get_json() or {}
         usuario = UsuarioController.login(dados.get("email", ""), dados.get("senha", ""))
+        session["usuario_id"] = usuario["id"]
+        session["tipo"] = usuario["tipo"]
         return jsonify({"dados": usuario, "sucesso": True, "mensagem": "Login OK"}), 200
     except PermissionError as e:
         return jsonify({"erro": str(e), "sucesso": False}), 401

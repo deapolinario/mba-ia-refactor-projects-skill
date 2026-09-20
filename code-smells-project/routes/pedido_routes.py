@@ -1,15 +1,18 @@
 import logging
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, session
 from controllers.pedido_controller import PedidoController
+from auth import login_required, role_required, owner_or_role_required
 
 logger = logging.getLogger(__name__)
 pedido_bp = Blueprint('pedidos', __name__)
 
 
 @pedido_bp.route('/pedidos', methods=['POST'])
+@login_required
 def criar_pedido():
     try:
-        dados = request.get_json()
+        dados = request.get_json() or {}
+        dados["usuario_id"] = session["usuario_id"]  # nunca confiar no usuario_id do payload
         resultado = PedidoController.criar(dados)
         return jsonify({
             "dados": resultado,
@@ -24,6 +27,7 @@ def criar_pedido():
 
 
 @pedido_bp.route('/pedidos', methods=['GET'])
+@role_required('admin')
 def listar_todos_pedidos():
     try:
         pedidos = PedidoController.listar_todos()
@@ -34,6 +38,7 @@ def listar_todos_pedidos():
 
 
 @pedido_bp.route('/pedidos/usuario/<int:usuario_id>', methods=['GET'])
+@owner_or_role_required('usuario_id', 'admin')
 def listar_pedidos_usuario(usuario_id):
     try:
         pedidos = PedidoController.listar_por_usuario(usuario_id)
@@ -44,6 +49,7 @@ def listar_pedidos_usuario(usuario_id):
 
 
 @pedido_bp.route('/pedidos/<int:pedido_id>/status', methods=['PUT'])
+@role_required('admin')
 def atualizar_status_pedido(pedido_id):
     try:
         dados = request.get_json() or {}
@@ -57,6 +63,7 @@ def atualizar_status_pedido(pedido_id):
 
 
 @pedido_bp.route('/relatorios/vendas', methods=['GET'])
+@role_required('admin')
 def relatorio_vendas():
     try:
         relatorio = PedidoController.relatorio_vendas()

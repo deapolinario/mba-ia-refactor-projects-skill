@@ -1,4 +1,3 @@
-import os
 import logging
 from functools import wraps
 from flask import Flask, jsonify, request
@@ -31,7 +30,7 @@ def admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         token = request.headers.get("X-Admin-Token")
-        expected = os.getenv("ADMIN_TOKEN")
+        expected = Config.ADMIN_TOKEN
         if not expected or token != expected:
             return jsonify({"erro": "Não autorizado"}), 401
         return f(*args, **kwargs)
