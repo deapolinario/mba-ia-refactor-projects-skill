@@ -235,6 +235,110 @@ return <condition>
 
 ---
 
+## v2.2 — Endpoints Perigosos, Auth e Regressões de Refactoring
+
+### 13. Dangerous Admin Endpoint / Arbitrary Code Execution (CRITICAL)
+
+**Descrição:** Endpoint que executa SQL (ou comando de sistema) construído a partir de input do cliente sem qualquer restrição — pior que SQL Injection acidental, é execução arbitrária *by design*.
+
+**Sinais de Detecção:**
+- `cursor.execute(query)` onde `query` vem de `request.get_json()`, `request.body`, `req.body`
+- Rotas como `/admin/query`, `/exec`, `/run-sql`, `/debug/eval`
+- `eval()`, `exec()`, `os.system()`, `subprocess.run()` com input do request
+
+**Padrão Seguro:**
+- Nunca expor execução de SQL/código arbitrário via API
+- Se necessário para debug, restringir a ambiente local + allowlist de queries
+
+**Impacto:** Comprometimento total do banco de dados e potencialmente do servidor. Pior que SQL Injection convencional pois não requer bypass — é a funcionalidade.
+
+---
+
+### 14. Plaintext Password Storage & Comparison (CRITICAL)
+
+**Descrição:** Diferente de "Weak Hashing" (MD5/SHA1) — aqui não há hash *nenhum*. Senha é comparada e armazenada como veio do cliente, e frequentemente retornada em responses.
+
+**Sinais de Detecção:**
+- Query de login comparando coluna de senha direto: `WHERE senha = ?` / `WHERE password = ?`
+- `INSERT INTO usuarios (..., senha, ...) VALUES (..., ?, ...)` com o valor bruto do request, sem `hash(...)` no caminho
+- Query `SELECT *` em tabela de usuários cujo resultado (incluindo coluna de senha) é serializado direto em `jsonify()`/`res.json()`
+
+**Padrão Seguro:**
+- Hash com bcrypt/argon2/PBKDF2 antes de persistir
+- Comparação via `check_password_hash()` / `bcrypt.compare()`, nunca `==` direto
+- Excluir coluna de senha de qualquer serialização (`to_dict(include_password=False)`)
+
+**Impacto:** Vazamento do banco expõe credenciais de todos os usuários instantaneamente, sem esforço de quebra.
+
+---
+
+### 15. Broken Access Control em Endpoints Sensíveis (CRITICAL/HIGH)
+
+**Descrição:** Rotas que alteram estado crítico (reset de dados, execução de queries, alteração de permissões) sem nenhum middleware de autenticação/autorização.
+
+**Sinais de Detecção:**
+- Rotas com prefixo `/admin`, `/internal`, `/debug` sem decorator/middleware de auth antes do handler
+- Ausência de checagem de token/sessão/role no início da função
+- Comparar lista de rotas registradas vs lista de rotas com guard de auth
+
+**Padrão Seguro:**
+- Middleware/decorator de autenticação (`@login_required`, `@admin_required`)
+- Verificação de role explícita no controller
+- Nunca confiar apenas em "rota não documentada" como proteção
+
+**Impacto:** Qualquer pessoa com a URL pode resetar dados, executar SQL ou escalar privilégios.
+
+---
+
+### 16. Exception Detail Leakage (MEDIUM)
+
+**Descrição:** Handlers retornam `str(exception)` diretamente na response HTTP, vazando stack traces, nomes de tabelas/colunas, paths internos e — combinado com endpoints de SQL — mensagens de erro do banco que ajudam ataques error-based.
+
+**Sinais de Detecção:**
+- `return jsonify({"erro": str(e)})`, `res.status(500).json({error: err.message})`
+- `except Exception as e:` seguido de exposição direta de `e` na response
+
+**Padrão Seguro:**
+- Logar o erro detalhado internamente (`logger.error(str(e))`)
+- Retornar mensagem genérica ao cliente (`"Erro interno do servidor"`)
+- Detalhar apenas em modo development controlado por flag de ambiente
+
+**Impacto:** Information disclosure que facilita reconhecimento e exploração de outras vulnerabilidades.
+
+---
+
+### 17. Regressão de Refactoring: Inicialização Por-Request (HIGH)
+
+**Descrição:** Ao refatorar conexão global para Singleton/DI, é comum mover a lógica de setup (criação de tabelas, seed de dados) para dentro da função chamada a cada request, ao invés de rodar apenas uma vez na inicialização do Singleton.
+
+**Sinais de Detecção:**
+- `CREATE TABLE IF NOT EXISTS` ou lógica de seed dentro de uma função tipo `get_db()`/`get_connection()` que é chamada em todo handler de rota
+- Comparar: essa lógica deveria estar em `__init__`/`__new__` do Singleton, executada uma única vez
+
+**Padrão Seguro:**
+- Setup de schema/seed dentro do `__init__` do Singleton (guardado por `_initialized`)
+- `get_db()`/`get_connection()` apenas retorna a conexão já existente, sem side-effects
+
+**Impacto:** Overhead de queries extras em toda request; em bancos maiores pode causar contenção/lock desnecessário. É uma regressão de performance introduzida pelo próprio refactoring, não um problema do código legado original — **checklist de validação da Fase 3 deve pegar isso**.
+
+---
+
+### 18. Configuração Morta / Não Aplicada (LOW)
+
+**Descrição:** Valor de configuração é criado (ex: `Config.DEBUG`) mas o código legado continua com o valor hardcoded no ponto de uso, tornando a config "morta".
+
+**Sinais de Detecção:**
+- Atributo definido em `Config`/`settings` nunca referenciado fora do próprio arquivo de config
+- Valor hardcoded coexistindo com a config equivalente (ex: `app.run(debug=True)` com `Config.DEBUG` existindo)
+
+**Padrão Seguro:**
+- Todo ponto de uso deve referenciar a `Config`, nunca o literal
+- Validação da Fase 3 deve grep pelo literal antigo para confirmar que não sobrou nenhuma ocorrência
+
+**Impacto:** Falsa sensação de que o comportamento é configurável; em produção pode ligar debug/expor stack traces mesmo com `.env` configurado corretamente.
+
+---
+
 ## Formato de Detecção (Agnóstico de Linguagem)
 
 Cada anti-pattern é procurado por padrões independentes de linguagem:

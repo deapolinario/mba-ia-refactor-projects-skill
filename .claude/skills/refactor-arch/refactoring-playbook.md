@@ -542,6 +542,207 @@ def is_admin(self):
 
 ---
 
+## v2.2 — Endpoints Perigosos, Auth, Exception Leakage, Regressões
+
+### Padrão 14: Remover/Proteger Endpoint de SQL Arbitrário
+
+**Problema:**
+```python
+@app.route("/admin/query", methods=["POST"])
+def executar_query():
+    dados = request.get_json()
+    query = dados.get("sql", "")
+    cursor.execute(query)  # ❌ Executa QUALQUER SQL do cliente
+```
+
+**Solução (remover é o padrão recomendado):**
+```python
+# ✅ Remover completamente o endpoint.
+# Se debug de banco for realmente necessário, usar ferramenta externa
+# (ex: sqlite3 CLI, DBeaver) nunca expor via API HTTP.
+```
+
+**Se não puder remover (caso de uso legítimo administrativo):**
+```python
+# ✅ Restringir a allowlist de queries pré-aprovadas + auth obrigatória
+ALLOWED_QUERIES = {
+    "contar_usuarios": "SELECT COUNT(*) FROM usuarios",
+    "contar_produtos": "SELECT COUNT(*) FROM produtos",
+}
+
+@app.route("/admin/query", methods=["POST"])
+@admin_required
+def executar_query():
+    nome_query = request.get_json().get("query_name")
+    if nome_query not in ALLOWED_QUERIES:
+        return jsonify({"erro": "Query não permitida"}), 403
+    cursor.execute(ALLOWED_QUERIES[nome_query])
+```
+
+**Por quê:** Execução de SQL arbitrário via HTTP nunca é seguro, independente de sanitização.
+
+---
+
+### Padrão 15: Hash de Senha + Remover Senha de Queries/Responses
+
+**Problema:**
+```python
+def login_usuario(email, senha):
+    cursor.execute(
+        "SELECT * FROM usuarios WHERE email = ? AND senha = ?",
+        [email, senha]  # ❌ Compara texto plano
+    )
+
+def get_todos_usuarios():
+    cursor.execute("SELECT * FROM usuarios")
+    # ❌ row["senha"] vai para o JSON de response
+```
+
+**Solução:**
+```python
+from werkzeug.security import generate_password_hash, check_password_hash
+
+def criar_usuario(nome, email, senha, tipo="cliente"):
+    senha_hash = generate_password_hash(senha, method='pbkdf2:sha256')
+    cursor.execute(
+        "INSERT INTO usuarios (nome, email, senha, tipo) VALUES (?, ?, ?, ?)",
+        [nome, email, senha_hash, tipo]
+    )
+
+def login_usuario(email, senha):
+    cursor.execute("SELECT * FROM usuarios WHERE email = ?", [email])
+    row = cursor.fetchone()
+    if row and check_password_hash(row["senha"], senha):
+        return {"id": row["id"], "nome": row["nome"], "email": row["email"], "tipo": row["tipo"]}
+    return None
+
+def get_todos_usuarios():
+    cursor.execute("SELECT id, nome, email, tipo, criado_em FROM usuarios")
+    # ✅ Coluna senha nunca sai do banco
+```
+
+**Por quê:** Hash impede recuperação da senha original mesmo com acesso ao banco; excluir a coluna na query (não só no dict) evita vazamento mesmo se alguém esquecer de filtrar depois.
+
+---
+
+### Padrão 16: Proteger Endpoints Administrativos
+
+**Problema:**
+```python
+@app.route("/admin/reset-db", methods=["POST"])
+def reset_database():
+    # ❌ Qualquer um pode chamar
+```
+
+**Solução:**
+```python
+from functools import wraps
+from flask import request, jsonify
+import os
+
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.headers.get("X-Admin-Token")
+        if not token or token != os.getenv("ADMIN_TOKEN"):
+            return jsonify({"erro": "Não autorizado"}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+@app.route("/admin/reset-db", methods=["POST"])
+@admin_required
+def reset_database():
+    ...
+```
+
+**Por quê:** Toda rota que altera estado crítico precisa de barreira explícita — nunca confiar em "URL não documentada".
+
+---
+
+### Padrão 17: Não Vazar Detalhes de Exceção ao Cliente
+
+**Problema:**
+```python
+except Exception as e:
+    return jsonify({"erro": str(e)}), 500  # ❌ Vaza detalhes internos
+```
+
+**Solução:**
+```python
+except Exception as e:
+    logger.error(f"Erro em criar_produto: {str(e)}")
+    return jsonify({"erro": "Erro interno do servidor"}), 500
+```
+
+**Por quê:** Cliente não precisa (e não deve) saber detalhes de implementação; detalhes ficam nos logs internos para debug.
+
+---
+
+### Padrão 18: Corrigir Regressão de Inicialização Por-Request
+
+**Problema:**
+```python
+def get_db():
+    conn = _db_manager.get_connection()
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE IF NOT EXISTS ...")  # ❌ roda em toda request
+    cursor.execute("SELECT COUNT(*) FROM produtos")   # ❌ query extra sempre
+    if cursor.fetchone()[0] == 0:
+        ...seed...
+    return conn
+```
+
+**Solução:**
+```python
+class DatabaseManager:
+    def __init__(self):
+        if self._initialized:
+            return
+        self.connection = sqlite3.connect(...)
+        self._setup_schema()   # ✅ roda uma única vez
+        self._seed_if_empty()  # ✅ roda uma única vez
+        self._initialized = True
+
+    def _setup_schema(self):
+        cursor = self.connection.cursor()
+        cursor.execute("CREATE TABLE IF NOT EXISTS ...")
+        self.connection.commit()
+
+    def _seed_if_empty(self):
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT COUNT(*) FROM produtos")
+        if cursor.fetchone()[0] == 0:
+            ...seed...
+
+def get_db():
+    return _db_manager.get_connection()  # ✅ sem side-effects
+```
+
+**Por quê:** Setup deve ser custo único de startup, não recorrente por request.
+
+---
+
+### Padrão 19: Aplicar Config Onde o Literal Antigo Estava
+
+**Problema:**
+```python
+# config.py
+DEBUG = os.getenv('FLASK_ENV') == 'development'
+
+# app.py (esqueceram de usar!)
+app.run(debug=True)  # ❌ literal antigo continua
+```
+
+**Solução:**
+```python
+# app.py
+app.run(debug=Config.DEBUG)  # ✅ usa a config criada
+```
+
+**Validação:** Após criar qualquer config nova, `grep` pelo valor literal antigo no restante do projeto para confirmar que não sobrou nenhuma ocorrência.
+
+---
+
 ## Validação Pós-Refatoração
 
 Após aplicar cada padrão, validar:
