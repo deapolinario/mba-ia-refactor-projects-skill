@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from controllers.user_controller import UserController
 from controllers.auth_controller import AuthController
 from middleware.auth import login_required, role_required
@@ -35,8 +35,10 @@ def create_user():
 @login_required
 def update_user(user_id):
     try:
-        user = UserController.update(user_id, request.get_json())
+        user = UserController.update(user_id, request.get_json(), g.current_user)
         return jsonify(user), 200
+    except PermissionError as e:
+        return jsonify({'error': str(e)}), 403
     except ValueError as e:
         if 'não encontrado' in str(e):
             return jsonify({'error': str(e)}), 404

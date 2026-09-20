@@ -22,13 +22,21 @@ class UserController:
 
     @staticmethod
     def create(data):
+        """
+        v3.0 - fix de escalação de privilégio: este endpoint é público
+        (cadastro de conta) e aceitava um campo 'role' no payload sem
+        nenhuma restrição — qualquer visitante anônimo podia se cadastrar
+        direto como 'admin'. Confirmado via exploit manual. Cadastro
+        público agora sempre cria com role='user'; promover alguém a
+        admin/manager só é possível via PUT /users/:id por um admin
+        existente (ver UserController.update).
+        """
         if not data:
             raise ValueError('Dados inválidos')
 
         name = data.get('name')
         email = data.get('email')
         password = data.get('password')
-        role = data.get('role', 'user')
 
         if not name:
             raise ValueError('Nome é obrigatório')
@@ -42,26 +50,44 @@ class UserController:
             raise ValueError('Senha deve ter no mínimo 4 caracteres')
         if User.query.filter_by(email=email).first():
             raise ValueError('Email já cadastrado')
-        if role not in Config.VALID_ROLES:
-            raise ValueError('Role inválido')
 
         user = User()
         user.name = name
         user.email = email
         user.set_password(password)
-        user.role = role
+        user.role = 'user'
 
         db.session.add(user)
         db.session.commit()
         return user.to_dict()
 
     @staticmethod
-    def update(user_id, data):
+    def update(user_id, data, requester):
+        """
+        v3.0 - fix de escalação de privilégio: a rota exigia login, mas
+        nada impedia um usuário comum de editar OUTRO usuário, ou de
+        alterar role/active (o próprio ou de terceiros). Confirmado via
+        exploit manual: usuário 'user' promovia qualquer conta a 'admin'
+        através deste endpoint.
+
+        Regra: um usuário só edita a si mesmo, exceto admin (edita qualquer
+        um). 'role'/'active' só podem ser alterados por admin, mesmo que o
+        alvo seja o próprio usuário (evita autopromoção).
+        """
         user = User.query.get(user_id)
         if not user:
             raise ValueError('Usuário não encontrado')
         if not data:
             raise ValueError('Dados inválidos')
+
+        is_self = requester.id == user_id
+        is_admin = requester.role == 'admin'
+
+        if not is_self and not is_admin:
+            raise PermissionError('Você só pode editar seu próprio usuário')
+
+        if ('role' in data or 'active' in data) and not is_admin:
+            raise PermissionError('Apenas administradores podem alterar role/active')
 
         if 'name' in data:
             user.name = data['name']

@@ -142,4 +142,24 @@ task-manager-api/
 └── REFACTORING_LOG_v3_0.md
 ```
 
-Próximo passo: **Self-Verification Loop (Fase 3, passo 7 da skill v3.0)**.
+Self-Verification Loop (Fase 3, passo 7, ciclo 1): 0 achados nos 18 anti-patterns formais (ver `reports/audit-task-manager-api-2026-09-20T12-14-27.md`).
+
+---
+
+## Ciclo 2 — Achados fora dos 18 padrões formais, encontrados em reauditoria posterior
+
+Uma reauditoria fresca (Fases 1-2, `reports/audit-task-manager-api-2026-09-20T12-36-45.md`) testou a **lógica de autorização dentro dos controllers** — não só "a rota tem guard?" — e encontrou 2 falhas de escalação de privilégio que o ciclo 1 não cobriu:
+
+### 🔴 CRITICAL: Privilege Escalation via `PUT /users/:id`
+Qualquer usuário autenticado (`role=user`) podia alterar `role`/`active` de **qualquer outro usuário**, incluindo se autopromover a admin. Confirmado via exploit manual.
+
+**Fix:** `UserController.update()` passou a receber o `requester` (usuário autenticado). Regras: só o próprio usuário ou um admin edita um perfil; `role`/`active` só um admin altera (mesmo no próprio perfil, evitando autopromoção). `routes/user_routes.py` passa `g.current_user` e trata `PermissionError` como 403.
+
+### 🔴 CRITICAL: Privilege Escalation via `POST /users` (cadastro público)
+O cadastro público aceitava `role` do payload sem restrição — qualquer visitante anônimo se cadastrava direto como admin, sem precisar de exploit ou conta prévia.
+
+**Fix:** `UserController.create()` sempre força `role='user'`, ignorando o campo do payload. Provisionamento de admin continua via `seed.py` (bootstrap legítimo, bypassa o controller).
+
+**Validação:** exploits confirmados falhando (403/role=user forçado) + suite de regressão completa (12 cenários) reexecutada sem quebras. Ver `reports/audit-task-manager-api-2026-09-20T12-42-10.md` (self-verification ciclo 2, 0 achados).
+
+**Lição para v3.1:** a checklist de self-verification do ciclo 1 verificou presença de `@login_required`/`@role_required` nas rotas, mas não testou a lógica de autorização granular dentro dos controllers. Uma rota "protegida" ainda pode ter um IDOR/privilege escalation na lógica de negócio.
