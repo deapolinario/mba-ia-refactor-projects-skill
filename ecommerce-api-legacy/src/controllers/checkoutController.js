@@ -23,7 +23,10 @@ async function checkout({ usr, eml, pwd, c_id, card }) {
 
     let user = await userModel.findByEmail(eml);
     if (!user) {
-        const hash = await bcrypt.hash(pwd || '123456', 10);
+        if (!pwd) {
+            throw new ValidationError('Senha é obrigatória para novo cadastro');
+        }
+        const hash = await bcrypt.hash(pwd, 10);
         const userId = await userModel.create(usr, eml, hash);
         user = { id: userId };
     }
