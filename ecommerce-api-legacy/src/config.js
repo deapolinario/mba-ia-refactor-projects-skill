@@ -1,10 +1,8 @@
 require('dotenv').config();
 
 const config = {
-    dbUser: process.env.DB_USER,
     dbPass: process.env.DB_PASS,
     paymentGatewayKey: process.env.PAYMENT_GATEWAY_KEY,
-    smtpUser: process.env.SMTP_USER,
     port: parseInt(process.env.PORT, 10) || 3000,
     adminToken: process.env.ADMIN_TOKEN,
 
