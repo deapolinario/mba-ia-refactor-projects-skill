@@ -12,6 +12,10 @@ class Config:
     # Flask
     DEBUG = os.getenv('FLASK_ENV') == 'development'
 
+    # Domínio (v2.2 - extraído de magic strings em controllers.py)
+    VALID_CATEGORIES = ["informatica", "moveis", "vestuario", "geral", "eletronicos", "livros"]
+    VALID_ORDER_STATUSES = ["pendente", "aprovado", "enviado", "entregue", "cancelado"]
+
     # Validação no startup
     @staticmethod
     def validate():

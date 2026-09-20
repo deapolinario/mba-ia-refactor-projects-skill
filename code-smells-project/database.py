@@ -1,7 +1,7 @@
 import sqlite3
-import os
 import threading
 from config import Config
+
 
 class DatabaseManager:
     """Singleton thread-safe para gerenciar conexão com banco de dados"""
@@ -26,6 +26,8 @@ class DatabaseManager:
             check_same_thread=False
         )
         self.connection.row_factory = sqlite3.Row
+        self._setup_schema()
+        self._seed_if_empty()
         self._initialized = True
 
     def get_connection(self):
@@ -35,56 +37,60 @@ class DatabaseManager:
         if self.connection:
             self.connection.close()
 
-_db_manager = DatabaseManager()
+    def _setup_schema(self):
+        """Roda uma única vez na inicialização do Singleton (não por request)."""
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS produtos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT,
+                descricao TEXT,
+                preco REAL,
+                estoque INTEGER,
+                categoria TEXT,
+                ativo INTEGER DEFAULT 1,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS usuarios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT,
+                email TEXT,
+                senha TEXT,
+                tipo TEXT DEFAULT 'cliente',
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pedidos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                usuario_id INTEGER,
+                status TEXT DEFAULT 'pendente',
+                total REAL,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS itens_pedido (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pedido_id INTEGER,
+                produto_id INTEGER,
+                quantidade INTEGER,
+                preco_unitario REAL
+            )
+        """)
+        self.connection.commit()
 
-def get_db():
-    db_connection = _db_manager.get_connection()
-    cursor = db_connection.cursor()
+    def _seed_if_empty(self):
+        """Roda uma única vez na inicialização do Singleton (não por request)."""
+        from werkzeug.security import generate_password_hash
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS produtos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT,
-            descricao TEXT,
-            preco REAL,
-            estoque INTEGER,
-            categoria TEXT,
-            ativo INTEGER DEFAULT 1,
-            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS usuarios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT,
-            email TEXT,
-            senha TEXT,
-            tipo TEXT DEFAULT 'cliente',
-            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS pedidos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            usuario_id INTEGER,
-            status TEXT DEFAULT 'pendente',
-            total REAL,
-            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS itens_pedido (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pedido_id INTEGER,
-            produto_id INTEGER,
-            quantidade INTEGER,
-            preco_unitario REAL
-        )
-    """)
-    db_connection.commit()
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT COUNT(*) FROM produtos")
+        if cursor.fetchone()[0] != 0:
+            return
 
-    cursor.execute("SELECT COUNT(*) FROM produtos")
-    if cursor.fetchone()[0] == 0:
         produtos = [
             ("Notebook Gamer", "Notebook potente para jogos", 5999.99, 10, "informatica"),
             ("Mouse Wireless", "Mouse sem fio ergonômico", 89.90, 50, "informatica"),
@@ -103,14 +109,20 @@ def get_db():
         )
 
         usuarios = [
-            ("Admin", "admin@loja.com", "admin123", "admin"),
-            ("João Silva", "joao@email.com", "123456", "cliente"),
-            ("Maria Santos", "maria@email.com", "senha123", "cliente"),
+            ("Admin", "admin@loja.com", generate_password_hash("admin123", method='pbkdf2:sha256'), "admin"),
+            ("João Silva", "joao@email.com", generate_password_hash("123456", method='pbkdf2:sha256'), "cliente"),
+            ("Maria Santos", "maria@email.com", generate_password_hash("senha123", method='pbkdf2:sha256'), "cliente"),
         ]
         cursor.executemany(
             "INSERT INTO usuarios (nome, email, senha, tipo) VALUES (?, ?, ?, ?)",
             usuarios
         )
-        db_connection.commit()
+        self.connection.commit()
 
-    return db_connection
+
+_db_manager = DatabaseManager()
+
+
+def get_db():
+    """Retorna a conexão já inicializada. Sem side-effects — setup roda só no __init__."""
+    return _db_manager.get_connection()
