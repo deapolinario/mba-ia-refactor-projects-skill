@@ -1,12 +1,14 @@
 # Skill: Refactor Architecture
 
-**Versão:** 3.0 (18 anti-patterns + validação de regressão + self-verification loop)
+**Versão:** 3.1 (19 anti-patterns + validação de regressão + self-verification loop com teste de autorização granular)
 
 **Objetivo:** Analisar, auditar e refatorar projetos legados para o padrão MVC, eliminando vulnerabilidades críticas, problemas arquiteturais e code smells.
 
 **Mudança de princípio em v2.2:** a Fase 3 deixa de ser **seletiva** (só tratar os achados "principais") e passa a ser **sistemática** — TODO achado listado na Fase 2 deve ser resolvido ou explicitamente marcado como "adiado para próxima versão" no output, nunca silenciosamente ignorado.
 
 **Mudança de princípio em v3.0:** a Fase 3 deixa de confiar no próprio log de refatoração como prova de sucesso. Ao final, ela **se reaudita** — relê o código já refatorado do zero e roda a checklist de 18 anti-patterns de novo, exatamente como faria uma Fase 2 nova. Isso existe porque, na prática, essa reauditoria pegou coisas reais que o log de refatoração não pegava: uma regressão introduzida pela própria refatoração (setup de banco rodando por-request), um N+1 residual que sobrou fora do escopo original corrigido, e configuração morta copiada do código legado sem verificar se tinha uso. Se a reauditoria vier limpa, a skill encerra. Se encontrar algo, ela **pergunta ao usuário se deve continuar corrigindo** — nunca decide isso por conta própria — e, se autorizada, repete o ciclo (corrigir → validar → reauditar) até ficar limpo ou até um limite de 3 ciclos.
+
+**Mudança de princípio em v3.1:** a self-verification da v3.0 provou ser insuficiente contra um tipo específico de achado — no task-manager-api, o ciclo 1 declarou 0 achados relendo o código e confirmando que toda rota sensível tinha `@login_required`/`@role_required`, mas isso é uma checagem **estrutural** (o decorator existe?). Uma reauditoria seguinte, testando a lógica de autorização **funcionalmente** com um usuário de baixo privilégio, encontrou 2 CRITICAL de escalação de privilégio que a checagem estrutural nunca poderia pegar: `PUT /users/:id` tinha o decorator certo mas nenhuma checagem de "quem pode alterar o quê", e `POST /users` (cadastro público) aceitava `role` do payload sem restrição. v3.1 adiciona o Padrão 19 (Autorização Granular) ao catálogo e, mais importante, torna esse teste funcional — não só estrutural — parte obrigatória do self-verification (Fase 3, passo 7).
 
 ---
 
@@ -62,6 +64,7 @@ DB tables:      [LISTA]
    - Senhas em Texto Plano (armazenamento E comparação, não só hashing fraco)
    - Dangerous Admin Endpoint / Execução de SQL/código arbitrário via API
    - Broken Access Control (rotas administrativas/sensíveis sem auth)
+   - Privilege Escalation via Autorização Insuficiente (rota autenticada, mas sem checagem de ownership/allowlist de campos sensíveis — ver Padrão 19)
    
    **HIGH:**
    - Weak Password Hashing (MD5, SHA1)
@@ -158,6 +161,12 @@ Total findings: X (X CRITICAL, X HIGH)
    - Adicionar guard de autenticação/autorização em toda rota `/admin/*` ou equivalente
    - Ver Padrão 16 em `refactoring-playbook.md`
 
+   **CRITICAL - Privilege Escalation via Autorização Insuficiente:**
+   - Em handlers de update: checar ownership (`resource.owner_id == requester.id`) ou role antes de aplicar qualquer mudança
+   - Campos sensíveis (`role`, `is_admin`, `active`, `price`, saldo, etc.) só podem ser alterados por quem tem privilégio para isso — mesmo quando o alvo é o próprio requester (evita autopromoção)
+   - Endpoints de cadastro público nunca leem campos de privilégio do payload — valor sempre fixo definido pelo servidor
+   - Ver Padrões 20-21 em `refactoring-playbook.md`
+
    **CRITICAL - God Classes / Monolithic Architecture:**
    - Separar em `models/`, `routes/`, `controllers/`
    - Cada arquivo com uma responsabilidade clara
@@ -246,13 +255,21 @@ Validation:
 ================================
 ```
 
-7. **Self-Verification Loop (v3.0, obrigatório, roda sempre que a Fase 3 for executada):**
+7. **Self-Verification Loop (v3.0, expandido em v3.1, obrigatório, roda sempre que a Fase 3 for executada):**
 
    a. **Reler o código do zero.** Ler novamente todos os arquivos atuais do projeto (não os arquivos "que deveriam ter sido alterados" — o conjunto completo), exatamente como se fosse uma Fase 2 nova sendo executada por alguém sem acesso ao log de refatoração desta sessão. Não aceitar o checklist do passo 6 como prova — ele documenta intenção, a releitura confirma resultado.
 
-   b. **Rodar a checklist completa dos 18 anti-patterns** (`anti-patterns-catalog.md`) contra esse código. Isso inclui padrões fora do escopo dos achados originais da Fase 2 — a reauditoria pode (e deve) encontrar coisas novas, incluindo regressões introduzidas pela própria refatoração deste ciclo.
+   b. **Rodar a checklist completa dos 19 anti-patterns** (`anti-patterns-catalog.md`) contra esse código. Isso inclui padrões fora do escopo dos achados originais da Fase 2 — a reauditoria pode (e deve) encontrar coisas novas, incluindo regressões introduzidas pela própria refatoração deste ciclo.
 
-   c. **Gerar um novo relatório de auditoria**, com timestamp novo, seguindo o mesmo padrão de nomenclatura da Fase 2 (`../reports/audit-{repo-name}-{timestamp}.md`).
+   b2. **Teste Funcional de Autorização (v3.1, obrigatório — não é opcional mesmo se o passo `b` não apontar nada).** O Padrão 19 (Privilege Escalation) não é detectável só relendo/grepando o código — uma rota pode ter o decorator de auth certo e ainda ter uma falha de autorização na lógica interna do controller. Portanto, para todo endpoint de escrita (POST/PUT/PATCH/DELETE) que aceita ou pode alterar campos sensíveis (`role`, `is_admin`, `active`, `price`, saldo, `owner_id`, status de pagamento, ou qualquer campo que determine privilégio/propriedade), simular requisições reais (Flask test client / supertest / equivalente) com um usuário de **baixo privilégio** e confirmar:
+      - Ele **não consegue** alterar esses campos sensíveis em si mesmo (ex: autopromoção a admin)
+      - Ele **não consegue** alterar/deletar um recurso que pertence a outro usuário, quando o domínio exige ownership
+      - Um endpoint de cadastro/criação **público** força o valor de qualquer campo de privilégio no servidor, ignorando o que vier no payload
+      - Casos legítimos continuam funcionando (o próprio usuário edita seus dados não-sensíveis; um admin/role adequado consegue fazer a operação)
+      
+      Se qualquer uma dessas simulações tiver sucesso quando deveria falhar (ou falhar quando deveria ter sucesso), é um achado CRITICAL — tratar como qualquer outro achado do passo `b` (mesmo checklist, mesma decisão de continuar/parar no passo `e`/`f`/`g`).
+
+   c. **Gerar um novo relatório de auditoria**, com timestamp novo, seguindo o mesmo padrão de nomenclatura da Fase 2 (`../reports/audit-{repo-name}-{timestamp}.md`), incluindo os resultados do passo `b2`.
 
    d. **Se 0 achados:** imprimir confirmação e encerrar o fluxo — não perguntar nada, a Fase 3 terminou com sucesso.
 
@@ -290,9 +307,9 @@ Validation:
 ## Referências Carregadas
 
 - `project-analysis.md` → Heurísticas de detecção
-- `anti-patterns-catalog.md` → Catálogo de problemas (18 padrões)
+- `anti-patterns-catalog.md` → Catálogo de problemas (19 padrões)
 - `audit-report-template.md` → Formato de relatório
-- `refactoring-playbook.md` → Padrões de transformação (19 padrões)
+- `refactoring-playbook.md` → Padrões de transformação (21 padrões)
 - `architecture-guidelines.md` → Guidelines MVC (visão geral)
 - `mvc-refactoring-guide.md` → Guia passo-a-passo (Phase 3)
 
@@ -309,10 +326,11 @@ Validation:
 7. **Auto-crítica (v2.2):** Fase 3 sempre roda o Checklist de Regressão antes de declarar sucesso, para pegar bugs introduzidos pela própria refatoração (ex: setup que passou a rodar por-request, config criada mas não aplicada)
 8. **Auto-verificadora (v3.0):** Fase 3 nunca termina só porque o checklist de intenção está todo `✅` — ela relê o código do zero e reaplica a Fase 2 sobre o resultado antes de declarar sucesso
 9. **Nunca decide sozinha continuar corrigindo (v3.0):** se a self-verification encontra achados, a skill pergunta ao usuário — só continua o ciclo com `y`/`yes` explícito, e para automaticamente no limite de 3 ciclos independente da resposta
+10. **Testa autorização funcionalmente, não só estruturalmente (v3.1):** presença de `@login_required`/`@role_required` numa rota não é aceita como prova de que a autorização está correta — o self-verification simula requisições reais com usuário de baixo privilégio contra endpoints de escrita sensíveis
 
 ---
 
-## Limitações v3.0
+## Limitações v3.1
 
 - Suporte oficialmente para Python + Node.js (heurísticas agnósticas)
 - Detecção de padrões é baseada em regex/heurística estrutural (pode ter falsos positivos)
@@ -322,10 +340,12 @@ Validation:
 - Auth adicionada em endpoints administrativos é um guard mínimo (token), não um sistema de autenticação completo
 - Self-verification loop tem limite fixo de 3 ciclos — projetos com achados encadeados profundos (fix de A introduz B, fix de B introduz C, ...) podem precisar de revisão manual após o limite
 - Cada ciclo relê o projeto inteiro — em projetos grandes isso tem custo (tempo/tokens) proporcional ao tamanho, não incremental
+- O teste funcional de autorização (passo 7.b2) depende de conseguir simular requisições (test client/supertest); em stacks sem essa capacidade fácil, a verificação fica só estrutural (mesma limitação da v3.0)
+- A checagem de ownership/allowlist de campos sensíveis é heurística — não substitui um sistema de permissões (RBAC/ABAC) completo; para domínios com regras de autorização complexas (múltiplos níveis de hierarquia, permissões por recurso), a skill propõe o guard mínimo, não a modelagem completa
 
 ---
 
-## O Que v3.0 Cobre
+## O Que v3.1 Cobre
 
 ✅ **CRITICAL:**
 - SQL Injection
@@ -333,6 +353,7 @@ Validation:
 - Senhas em Texto Plano (armazenamento + comparação + exposição em responses)
 - Dangerous Admin Endpoint (execução de SQL/código arbitrário)
 - Broken Access Control (rotas administrativas sem auth)
+- Privilege Escalation via Autorização Insuficiente (rota autenticada sem ownership check/allowlist de campos sensíveis — IDOR, mass assignment de role/active)
 - God Classes/Módulos (com guia MVC passo-a-passo)
 - Monolithic Architecture
 
@@ -360,7 +381,8 @@ Validation:
 ✅ **PROCESSO:**
 - Checklist sistemática de achados (Fase 3 não pula itens silenciosamente)
 - Checklist de regressão pós-refactoring
-- **Self-verification loop:** Fase 3 se reaudita relendo o código do zero e reaplicando os 18 anti-patterns, ao invés de confiar no próprio log de refatoração
+- **Self-verification loop:** Fase 3 se reaudita relendo o código do zero e reaplicando os 19 anti-patterns, ao invés de confiar no próprio log de refatoração
+- **Teste funcional de autorização (v3.1):** self-verification simula requisições com usuário de baixo privilégio contra endpoints de escrita sensíveis — não aceita a presença de um decorator como prova de autorização correta
 - **Loop com controle do usuário:** achados na reauditoria nunca são corrigidos automaticamente — a skill pergunta e só continua com `y`/`yes` explícito
 - **Limite de segurança:** máximo 3 ciclos de correção↔reauditoria, evitando loop infinito
 
@@ -368,6 +390,6 @@ Validation:
 
 ## Próximas Versões
 
-v3.1: Testes automatizados de request/response (não só sintaxe) na validação da Fase 3
-v3.2: Sistema de autenticação completo (não só guard de token) no MVC guide
+v3.2: Testes automatizados de request/response mais amplos (não só autorização) na validação da Fase 3
+v3.3: Sistema de autenticação completo (não só guard de token) no MVC guide
 v4.0: Suporte para microserviços e arquiteturas distribuídas

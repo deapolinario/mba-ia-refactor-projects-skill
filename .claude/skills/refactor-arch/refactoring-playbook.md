@@ -743,6 +743,89 @@ app.run(debug=Config.DEBUG)  # ✅ usa a config criada
 
 ---
 
+## v3.1 — Autorização Granular
+
+### Padrão 20: Impedir Privilege Escalation em Update de Usuário/Recurso
+
+**Problema:**
+```python
+# Qualquer usuário autenticado pode alterar role/active de QUALQUER usuário,
+# incluindo si mesmo (autopromoção a admin)
+@app.route('/users/<int:user_id>', methods=['PUT'])
+@login_required
+def update_user(user_id):
+    user = User.query.get(user_id)
+    if 'role' in data:
+        user.role = data['role']        # ❌ sem checar quem está pedindo
+    if 'active' in data:
+        user.active = data['active']    # ❌ idem
+    ...
+```
+
+**Solução:**
+```python
+def update(user_id, data, requester):
+    user = User.query.get(user_id)
+
+    is_self = requester.id == user_id
+    is_admin = requester.role == 'admin'
+
+    # ✅ ownership check: só o próprio usuário ou um admin edita
+    if not is_self and not is_admin:
+        raise PermissionError('Você só pode editar seu próprio usuário')
+
+    # ✅ campo sensível: só admin altera, MESMO no próprio perfil
+    if ('role' in data or 'active' in data) and not is_admin:
+        raise PermissionError('Apenas administradores podem alterar role/active')
+
+    if 'name' in data:
+        user.name = data['name']   # campos não-sensíveis: qualquer um edita o próprio
+    if 'role' in data:
+        user.role = data['role']
+    ...
+
+# Na rota:
+@app.route('/users/<int:user_id>', methods=['PUT'])
+@login_required
+def update_user(user_id):
+    try:
+        return jsonify(UserController.update(user_id, request.get_json(), g.current_user)), 200
+    except PermissionError as e:
+        return jsonify({'error': str(e)}), 403
+```
+
+**Por quê:** `@login_required` prova identidade (autenticação); a checagem de ownership + allowlist de campos sensíveis prova permissão (autorização). São coisas diferentes — uma rota pode ter a primeira e não ter a segunda.
+
+---
+
+### Padrão 21: Nunca Aceitar Campos Sensíveis em Cadastro Público
+
+**Problema:**
+```python
+# POST /users é público (correto — é cadastro), mas aceita 'role' do payload
+@app.route('/users', methods=['POST'])
+def create_user():
+    data = request.get_json()
+    user = User(role=data.get('role', 'user'))  # ❌ cliente escolhe o próprio role
+```
+
+**Solução:**
+```python
+@app.route('/users', methods=['POST'])
+def create_user():
+    data = request.get_json()
+    user = User(role='user')  # ✅ sempre fixo — nunca lido do payload
+
+# Provisionar admin/manager: via seed/migração (bootstrap) ou por um admin
+# já existente usando PUT /users/:id (Padrão 20), nunca no cadastro público.
+```
+
+**Por quê:** Um endpoint público não deve nunca aceitar do cliente um valor que determina privilégio — mesmo que exista validação de formato (`role in VALID_ROLES`), isso não impede o cliente de simplesmente escolher `role: 'admin'`.
+
+**Validação (self-verification, Fase 3 passo 7):** para todo endpoint de escrita que aceita campos sensíveis, testar funcionalmente com um usuário de privilégio baixo — não apenas confirmar que a rota tem um decorator de auth. Ver checklist de autorização em `SKILL.md`.
+
+---
+
 ## Validação Pós-Refatoração
 
 Após aplicar cada padrão, validar:

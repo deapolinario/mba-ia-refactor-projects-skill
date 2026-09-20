@@ -339,6 +339,32 @@ return <condition>
 
 ---
 
+## v3.1 — Autorização Granular (distinta de Autenticação)
+
+### 19. Privilege Escalation via Autorização Insuficiente (CRITICAL)
+
+**Descrição:** Diferente do Padrão 5 (Broken Access Control, que é sobre rotas **sem nenhum** guard de autenticação) — aqui a rota **tem** autenticação, mas falta **autorização granular**: nada impede um usuário autenticado de alterar campos sensíveis (role, is_admin, active, price, owner_id, status de pagamento) em si mesmo ou em recursos de terceiros, ou de operar sobre um recurso que não é seu (IDOR — Insecure Direct Object Reference).
+
+Descoberto originalmente no task-manager-api: `PUT /users/:id` tinha `@login_required` e ainda assim permitia que qualquer usuário `role=user` promovesse **qualquer outro usuário** (incluindo si mesmo) a `admin`, e `POST /users` (cadastro público, corretamente sem auth) aceitava `role` do payload sem nenhuma restrição — visitante anônimo se cadastrava direto como admin.
+
+**Sinais de Detecção:**
+- Handler de update/patch que faz `setattr`/atualização de campo a partir do payload do cliente sem checar (a) se o requester é o **dono** do recurso ou tem role adequado, e (b) se o **campo específico** sendo alterado (role, is_admin, active, price, balance, owner_id...) requer privilégio extra mesmo quando o alvo é o próprio requester
+- Endpoint de criação **pública** (signup, cadastro) que aceita do payload um campo que deveria ser sempre um valor fixo definido pelo servidor (`role`, `is_admin`, `verified`, `balance` inicial)
+- Presença de `@login_required`/`@role_required` na rota sem checagem de ownership (`resource.user_id == current_user.id`) nem de "quais campos este role pode alterar"
+- Mass assignment: todo o `request.body`/`data` é aplicado ao objeto sem allowlist de campos permitidos por role
+
+**Padrão Seguro:**
+- Checagem de ownership: `if resource.owner_id != current_user.id and not current_user.is_admin: return 403`
+- Allowlist de campos por role: campos sensíveis (`role`, `active`, `is_admin`, `price`) só entram no update se `current_user.is_admin`, independente de quem é o alvo
+- Endpoint de cadastro público nunca lê `role`/`is_admin`/similar do payload — sempre valor fixo no servidor
+- Promoção de privilégio é uma operação separada e explicitamente protegida (ex: `PATCH /users/:id/role`, só admin), não um campo qualquer dentro de um update genérico
+
+**Impacto:** Tomada de conta (account takeover) ou escalação completa a admin em uma única requisição — mais grave que muitos dos achados CRITICAL "clássicos" (SQL injection, secrets) porque não requer sequer exploração técnica sofisticada, só entender o payload.
+
+**Nota de processo (por que isso escapou da v3.0):** a self-verification da v3.0 verificava "a rota tem guard de autenticação/role?" — uma checagem estrutural (grep/leitura). Este padrão só é detectável **testando funcionalmente** a lógica de autorização dentro do controller com um usuário de privilégio baixo, não por inspeção estática do decorator da rota. Ver Fase 3, passo 7 atualizado no `SKILL.md`.
+
+---
+
 ## Formato de Detecção (Agnóstico de Linguagem)
 
 Cada anti-pattern é procurado por padrões independentes de linguagem:
