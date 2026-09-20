@@ -71,16 +71,20 @@ def criar_pedido(usuario_id, itens):
     db = get_db()
     cursor = db.cursor()
 
+    # v2.2: 1 única query com IN() em vez de 1 SELECT por item do carrinho
+    # (N+1 residual encontrado na reauditoria de 2026-09-20T10-14-52)
+    ids = [item["produto_id"] for item in itens]
+    placeholders = ",".join("?" * len(ids))
+    cursor.execute(f"SELECT * FROM produtos WHERE id IN ({placeholders})", ids)
+    produtos_cache = {row["id"]: row for row in cursor.fetchall()}
+
     total = 0
-    produtos_cache = {}
     for item in itens:
-        cursor.execute("SELECT * FROM produtos WHERE id = ?", [item["produto_id"]])
-        produto = cursor.fetchone()
+        produto = produtos_cache.get(item["produto_id"])
         if produto is None:
             return {"erro": f"Produto {item['produto_id']} não encontrado"}
         if produto["estoque"] < item["quantidade"]:
             return {"erro": f"Estoque insuficiente para {produto['nome']}"}
-        produtos_cache[item["produto_id"]] = produto
         total += produto["preco"] * item["quantidade"]
 
     cursor.execute(
