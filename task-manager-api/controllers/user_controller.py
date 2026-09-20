@@ -1,0 +1,113 @@
+from database import db
+from models.user import User
+from models.task import Task
+from config import Config
+from utils.helpers import validate_email
+
+
+class UserController:
+
+    @staticmethod
+    def list_all():
+        return [u.to_dict() for u in User.query.all()]
+
+    @staticmethod
+    def get_by_id(user_id):
+        user = User.query.get(user_id)
+        if not user:
+            raise ValueError('Usuário não encontrado')
+        data = user.to_dict()
+        data['tasks'] = [t.to_dict() for t in user.tasks]
+        return data
+
+    @staticmethod
+    def create(data):
+        if not data:
+            raise ValueError('Dados inválidos')
+
+        name = data.get('name')
+        email = data.get('email')
+        password = data.get('password')
+        role = data.get('role', 'user')
+
+        if not name:
+            raise ValueError('Nome é obrigatório')
+        if not email:
+            raise ValueError('Email é obrigatório')
+        if not password:
+            raise ValueError('Senha é obrigatória')
+        if not validate_email(email):
+            raise ValueError('Email inválido')
+        if len(password) < 4:
+            raise ValueError('Senha deve ter no mínimo 4 caracteres')
+        if User.query.filter_by(email=email).first():
+            raise ValueError('Email já cadastrado')
+        if role not in Config.VALID_ROLES:
+            raise ValueError('Role inválido')
+
+        user = User()
+        user.name = name
+        user.email = email
+        user.set_password(password)
+        user.role = role
+
+        db.session.add(user)
+        db.session.commit()
+        return user.to_dict()
+
+    @staticmethod
+    def update(user_id, data):
+        user = User.query.get(user_id)
+        if not user:
+            raise ValueError('Usuário não encontrado')
+        if not data:
+            raise ValueError('Dados inválidos')
+
+        if 'name' in data:
+            user.name = data['name']
+
+        if 'email' in data:
+            if not validate_email(data['email']):
+                raise ValueError('Email inválido')
+            existing = User.query.filter_by(email=data['email']).first()
+            if existing and existing.id != user_id:
+                raise ValueError('Email já cadastrado')
+            user.email = data['email']
+
+        if 'password' in data:
+            if len(data['password']) < 4:
+                raise ValueError('Senha muito curta')
+            user.set_password(data['password'])
+
+        if 'role' in data:
+            if data['role'] not in Config.VALID_ROLES:
+                raise ValueError('Role inválido')
+            user.role = data['role']
+
+        if 'active' in data:
+            user.active = data['active']
+
+        db.session.commit()
+        return user.to_dict()
+
+    @staticmethod
+    def delete(user_id):
+        user = User.query.get(user_id)
+        if not user:
+            raise ValueError('Usuário não encontrado')
+        Task.query.filter_by(user_id=user_id).delete()
+        db.session.delete(user)
+        db.session.commit()
+
+    @staticmethod
+    def get_tasks(user_id):
+        user = User.query.get(user_id)
+        if not user:
+            raise ValueError('Usuário não encontrado')
+        tasks = Task.query.filter_by(user_id=user_id).all()
+        result = []
+        for t in tasks:
+            data = t.to_dict()
+            data['overdue'] = t.is_overdue()
+            result.append(data)
+        return result
