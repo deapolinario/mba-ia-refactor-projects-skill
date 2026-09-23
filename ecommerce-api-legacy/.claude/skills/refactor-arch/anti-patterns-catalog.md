@@ -365,6 +365,49 @@ Descoberto originalmente no task-manager-api: `PUT /users/:id` tinha `@login_req
 
 ---
 
+## v3.2 — Uso de APIs Deprecated/Obsoletas
+
+### 20. Uso de APIs Deprecated / Obsoletas (MEDIUM, escala para HIGH se houver impacto de segurança ou correção)
+
+**Descrição:** Chamadas a funções, métodos ou módulos que o próprio runtime/framework/biblioteca marca como deprecated (aviso oficial de descontinuação, remoção planejada em versão futura, ou substituição documentada). Diferente de "código antigo que ainda funciona", uma API deprecated tem prazo de validade conhecido e frequentemente já carrega um bug sutil que motivou a depreciação (ex: `datetime.utcnow()` retorna datetime **naive**, sem timezone, o que causa bugs de comparação/serialização em sistemas que lidam com múltiplos fusos).
+
+Descoberto originalmente no task-manager-api: `datetime.utcnow()` usado 15 vezes em `models/task.py` para gerar timestamps (`created_at`, `updated_at`, etc). Passou despercebido nas auditorias anteriores porque o código "funciona" — o problema não é um erro de execução, é uso de API oficialmente deprecated desde Python 3.12 (`DeprecationWarning: datetime.datetime.utcnow() is deprecated`).
+
+**Sinais de Detecção (por stack):**
+
+*Python:*
+- `datetime.utcnow()` / `datetime.utcnow` → naive datetime, deprecated desde 3.12
+- `datetime.now()` sem argumento de timezone, quando o valor é tratado como UTC em outro ponto do código
+- `imp` (módulo) → substituído por `importlib`
+- `distutils` → removido no 3.12, substituído por `setuptools`/`packaging`
+- `urllib2`/`urlparse` (Python 2) → `urllib.request`/`urllib.parse`
+- `optparse` → `argparse`
+- Qualquer chamada que dispare `DeprecationWarning`/`PendingDeprecationWarning` visível em execução com `-W error` ou nos testes
+
+*Node.js/JavaScript:*
+- `new Buffer(...)` → `Buffer.from(...)`/`Buffer.alloc(...)`
+- `crypto.createCipher()`/`crypto.createDecipher()` → `crypto.createCipheriv()`/`crypto.createDecipheriv()`
+- `fs.exists()` → `fs.access()`
+- `new Date().getYear()` → `getFullYear()`
+- Dependência `request` (deprecated pelo mantenedor) → `axios`/`fetch` nativo
+- `util.isArray()`, `util.isNumber()` etc (removidos) → `Array.isArray()`, checagens nativas
+
+*Geral (qualquer linguagem):*
+- Comentário/anotação oficial `@deprecated` no código-fonte da lib usada
+- Changelog/docs da dependência com "Deprecated since version X" para o método chamado
+- Warning emitido em tempo de execução ou em `pip list --outdated`/`npm outdated` apontando API removida na próxima major
+
+**Padrão Moderno Recomendado (equivalentes):**
+- `datetime.utcnow()` → `datetime.now(timezone.utc)` (datetime **aware**, com tzinfo explícito)
+- `new Buffer(size)` → `Buffer.alloc(size)` / `Buffer.from(data)`
+- `crypto.createCipher(alg, pass)` → `crypto.createCipheriv(alg, key, iv)`
+- `imp.load_module(...)` → `importlib.import_module(...)`
+- Regra geral: consultar a documentação oficial da versão instalada da linguagem/lib para o substituto indicado na mensagem de depreciação, e aplicar o mesmo em todas as ocorrências (grep pelo nome do método/módulo no projeto inteiro, não corrigir só a primeira ocorrência)
+
+**Impacto:** Quebra garantida em upgrade futuro da linguagem/framework (a API é removida, não só avisada); no caso específico de datetime naive vs aware, bugs sutis de fuso horário que corrompem ordenação, expiração de tokens e comparação de timestamps — sem lançar exceção, então passam despercebidos em testes que não verificam timezone explicitamente.
+
+---
+
 ## Formato de Detecção (Agnóstico de Linguagem)
 
 Cada anti-pattern é procurado por padrões independentes de linguagem:

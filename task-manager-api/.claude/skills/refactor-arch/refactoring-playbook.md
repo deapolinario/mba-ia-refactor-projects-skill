@@ -826,6 +826,58 @@ def create_user():
 
 ---
 
+## v3.2 — APIs Deprecated/Obsoletas
+
+### Padrão 22: Substituir `datetime.utcnow()` (e outras APIs deprecated) pelo Equivalente Moderno
+
+**Problema:**
+```python
+# models/task.py — repetido em toda criação/atualização de timestamp
+from datetime import datetime
+
+class Task:
+    def __init__(self, titulo):
+        self.titulo = titulo
+        self.created_at = datetime.utcnow()  # ❌ deprecated desde Python 3.12, retorna datetime NAIVE
+        self.updated_at = datetime.utcnow()  # ❌ idem
+
+    def marcar_concluida(self):
+        self.status = "concluida"
+        self.updated_at = datetime.utcnow()  # ❌ idem — repetido em todo setter de timestamp
+```
+
+**Solução:**
+```python
+from datetime import datetime, timezone
+
+class Task:
+    def __init__(self, titulo):
+        self.titulo = titulo
+        self.created_at = datetime.now(timezone.utc)  # ✅ aware, com tzinfo explícito
+        self.updated_at = datetime.now(timezone.utc)  # ✅ idem
+
+    def marcar_concluida(self):
+        self.status = "concluida"
+        self.updated_at = datetime.now(timezone.utc)  # ✅ idem
+```
+
+**Outros exemplos do mesmo padrão (Node.js):**
+```javascript
+// Problema
+const buf = new Buffer(10);                      // ❌ deprecated
+const cipher = crypto.createCipher('aes192', k);  // ❌ deprecated, IV implícito e fraco
+
+// Solução
+const buf = Buffer.alloc(10);                                   // ✅
+const cipher = crypto.createCipheriv('aes-192-cbc', key, iv);   // ✅ IV explícito
+```
+
+**Por quê:** API deprecated tem remoção planejada — a migração adiada vira breaking change forçado num upgrade futuro de linguagem/runtime. No caso de `datetime.utcnow()`, o problema não é só "vai ser removida": um datetime naive já causa bugs silenciosos hoje (comparação com datetime aware lança `TypeError`, serialização não deixa claro que o valor é UTC, cálculo de expiração de token pode ficar incorreto se algum outro ponto do código assumir horário local).
+
+**Validação:** `grep -rn "utcnow()"` (Python) / `grep -rn "new Buffer(\|createCipher(\|createDecipher("` (Node.js) no projeto inteiro após a refatoração — confirmar que não sobrou nenhuma ocorrência, igual à validação do Padrão 19 (Config Morta) para literais antigos.
+
+---
+
 ## Validação Pós-Refatoração
 
 Após aplicar cada padrão, validar:

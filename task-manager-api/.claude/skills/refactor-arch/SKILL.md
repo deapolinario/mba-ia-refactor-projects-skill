@@ -1,6 +1,6 @@
 # Skill: Refactor Architecture
 
-**Versão:** 3.1 (19 anti-patterns + validação de regressão + self-verification loop com teste de autorização granular)
+**Versão:** 3.2 (20 anti-patterns + validação de regressão + self-verification loop com teste de autorização granular + detecção de APIs deprecated)
 
 **Objetivo:** Analisar, auditar e refatorar projetos legados para o padrão MVC, eliminando vulnerabilidades críticas, problemas arquiteturais e code smells.
 
@@ -9,6 +9,8 @@
 **Mudança de princípio em v3.0:** a Fase 3 deixa de confiar no próprio log de refatoração como prova de sucesso. Ao final, ela **se reaudita** — relê o código já refatorado do zero e roda a checklist de 18 anti-patterns de novo, exatamente como faria uma Fase 2 nova. Isso existe porque, na prática, essa reauditoria pegou coisas reais que o log de refatoração não pegava: uma regressão introduzida pela própria refatoração (setup de banco rodando por-request), um N+1 residual que sobrou fora do escopo original corrigido, e configuração morta copiada do código legado sem verificar se tinha uso. Se a reauditoria vier limpa, a skill encerra. Se encontrar algo, ela **pergunta ao usuário se deve continuar corrigindo** — nunca decide isso por conta própria — e, se autorizada, repete o ciclo (corrigir → validar → reauditar) até ficar limpo ou até um limite de 3 ciclos.
 
 **Mudança de princípio em v3.1:** a self-verification da v3.0 provou ser insuficiente contra um tipo específico de achado — no task-manager-api, o ciclo 1 declarou 0 achados relendo o código e confirmando que toda rota sensível tinha `@login_required`/`@role_required`, mas isso é uma checagem **estrutural** (o decorator existe?). Uma reauditoria seguinte, testando a lógica de autorização **funcionalmente** com um usuário de baixo privilégio, encontrou 2 CRITICAL de escalação de privilégio que a checagem estrutural nunca poderia pegar: `PUT /users/:id` tinha o decorator certo mas nenhuma checagem de "quem pode alterar o quê", e `POST /users` (cadastro público) aceitava `role` do payload sem restrição. v3.1 adiciona o Padrão 19 (Autorização Granular) ao catálogo e, mais importante, torna esse teste funcional — não só estrutural — parte obrigatória do self-verification (Fase 3, passo 7).
+
+**Mudança de princípio em v3.2:** o catálogo cobria segurança e arquitetura, mas não uso de **APIs deprecated/obsoletas** — categoria explicitamente exigida pelo enunciado do desafio. O efeito apareceu na prática: `datetime.utcnow()` (deprecated desde Python 3.12, retorna datetime naive) é usado 15 vezes em `models/task.py` no task-manager-api e não foi apontado em nenhuma auditoria anterior, porque nenhum item do checklist da Fase 2 procurava por isso — o código "funciona", então passava despercebido. v3.2 adiciona o Padrão 20 (APIs Deprecated) ao catálogo e ao checklist explícito da Fase 2 (categoria MEDIUM).
 
 ---
 
@@ -77,6 +79,7 @@ DB tables:      [LISTA]
    - Secrets Expostas em Responses
    - Logs Sensíveis (PII exposure)
    - Exception Detail Leakage (`str(e)` retornado ao cliente)
+   - APIs Deprecated/Obsoletas (ex: `datetime.utcnow()`, `new Buffer()`, `crypto.createCipher()` — ver Padrão 20)
    
    **LOW:**
    - Magic Strings / Magic Numbers
@@ -191,6 +194,11 @@ Total findings: X (X CRITICAL, X HIGH)
    - Logar detalhado internamente (`logger.error`), responder mensagem genérica
    - Ver Padrão 17 em `refactoring-playbook.md`
 
+   **MEDIUM - APIs Deprecated/Obsoletas:**
+   - Substituir cada chamada pelo equivalente moderno indicado no Padrão 20 (`anti-patterns-catalog.md`)
+   - `datetime.utcnow()` → `datetime.now(timezone.utc)` (aplicar em TODAS as ocorrências, grep pelo nome do método no projeto inteiro, não só a primeira)
+   - Ver Padrão 22 em `refactoring-playbook.md`
+
    **LOW - Configuração Morta:**
    - Após criar qualquer `Config.X`, grep pelo literal antigo no projeto inteiro e substituir todas as ocorrências
    - Ver Padrão 19 em `refactoring-playbook.md`
@@ -259,7 +267,7 @@ Validation:
 
    a. **Reler o código do zero.** Ler novamente todos os arquivos atuais do projeto (não os arquivos "que deveriam ter sido alterados" — o conjunto completo), exatamente como se fosse uma Fase 2 nova sendo executada por alguém sem acesso ao log de refatoração desta sessão. Não aceitar o checklist do passo 6 como prova — ele documenta intenção, a releitura confirma resultado.
 
-   b. **Rodar a checklist completa dos 19 anti-patterns** (`anti-patterns-catalog.md`) contra esse código. Isso inclui padrões fora do escopo dos achados originais da Fase 2 — a reauditoria pode (e deve) encontrar coisas novas, incluindo regressões introduzidas pela própria refatoração deste ciclo.
+   b. **Rodar a checklist completa dos 20 anti-patterns** (`anti-patterns-catalog.md`) contra esse código. Isso inclui padrões fora do escopo dos achados originais da Fase 2 — a reauditoria pode (e deve) encontrar coisas novas, incluindo regressões introduzidas pela própria refatoração deste ciclo.
 
    b2. **Teste Funcional de Autorização (v3.1, obrigatório — não é opcional mesmo se o passo `b` não apontar nada).** O Padrão 19 (Privilege Escalation) não é detectável só relendo/grepando o código — uma rota pode ter o decorator de auth certo e ainda ter uma falha de autorização na lógica interna do controller. Portanto, para todo endpoint de escrita (POST/PUT/PATCH/DELETE) que aceita ou pode alterar campos sensíveis (`role`, `is_admin`, `active`, `price`, saldo, `owner_id`, status de pagamento, ou qualquer campo que determine privilégio/propriedade), simular requisições reais (Flask test client / supertest / equivalente) com um usuário de **baixo privilégio** e confirmar:
       - Ele **não consegue** alterar esses campos sensíveis em si mesmo (ex: autopromoção a admin)
@@ -307,9 +315,9 @@ Validation:
 ## Referências Carregadas
 
 - `project-analysis.md` → Heurísticas de detecção
-- `anti-patterns-catalog.md` → Catálogo de problemas (19 padrões)
+- `anti-patterns-catalog.md` → Catálogo de problemas (20 padrões)
 - `audit-report-template.md` → Formato de relatório
-- `refactoring-playbook.md` → Padrões de transformação (21 padrões)
+- `refactoring-playbook.md` → Padrões de transformação (22 padrões)
 - `architecture-guidelines.md` → Guidelines MVC (visão geral)
 - `mvc-refactoring-guide.md` → Guia passo-a-passo (Phase 3)
 
@@ -330,7 +338,7 @@ Validation:
 
 ---
 
-## Limitações v3.1
+## Limitações v3.2
 
 - Suporte oficialmente para Python + Node.js (heurísticas agnósticas)
 - Detecção de padrões é baseada em regex/heurística estrutural (pode ter falsos positivos)
@@ -345,7 +353,7 @@ Validation:
 
 ---
 
-## O Que v3.1 Cobre
+## O Que v3.2 Cobre
 
 ✅ **CRITICAL:**
 - SQL Injection
@@ -369,6 +377,7 @@ Validation:
 - Logs Sensíveis (PII)
 - Exception Detail Leakage (`str(e)` na response)
 - DEBUG Mode Ativo
+- APIs Deprecated/Obsoletas (ex: `datetime.utcnow()` → `datetime.now(timezone.utc)`)
 
 ✅ **LOW:**
 - Magic Strings / Magic Numbers
@@ -381,7 +390,7 @@ Validation:
 ✅ **PROCESSO:**
 - Checklist sistemática de achados (Fase 3 não pula itens silenciosamente)
 - Checklist de regressão pós-refactoring
-- **Self-verification loop:** Fase 3 se reaudita relendo o código do zero e reaplicando os 19 anti-patterns, ao invés de confiar no próprio log de refatoração
+- **Self-verification loop:** Fase 3 se reaudita relendo o código do zero e reaplicando os 20 anti-patterns, ao invés de confiar no próprio log de refatoração
 - **Teste funcional de autorização (v3.1):** self-verification simula requisições com usuário de baixo privilégio contra endpoints de escrita sensíveis — não aceita a presença de um decorator como prova de autorização correta
 - **Loop com controle do usuário:** achados na reauditoria nunca são corrigidos automaticamente — a skill pergunta e só continua com `y`/`yes` explícito
 - **Limite de segurança:** máximo 3 ciclos de correção↔reauditoria, evitando loop infinito
@@ -390,6 +399,6 @@ Validation:
 
 ## Próximas Versões
 
-v3.2: Testes automatizados de request/response mais amplos (não só autorização) na validação da Fase 3
-v3.3: Sistema de autenticação completo (não só guard de token) no MVC guide
+v3.3: Testes automatizados de request/response mais amplos (não só autorização) na validação da Fase 3
+v3.4: Sistema de autenticação completo (não só guard de token) no MVC guide
 v4.0: Suporte para microserviços e arquiteturas distribuídas
