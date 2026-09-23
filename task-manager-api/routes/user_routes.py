@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify, g
 from controllers.user_controller import UserController
 from controllers.auth_controller import AuthController
 from middleware.auth import login_required, role_required
+from exceptions import NotFoundError, ConflictError, ValidationError
 
 user_bp = Blueprint('users', __name__)
 
@@ -17,7 +18,7 @@ def get_users():
 def get_user(user_id):
     try:
         return jsonify(UserController.get_by_id(user_id)), 200
-    except ValueError as e:
+    except NotFoundError as e:
         return jsonify({'error': str(e)}), 404
 
 
@@ -26,9 +27,10 @@ def create_user():
     try:
         user = UserController.create(request.get_json())
         return jsonify(user), 201
-    except ValueError as e:
-        status = 409 if 'já cadastrado' in str(e) else 400
-        return jsonify({'error': str(e)}), status
+    except ConflictError as e:
+        return jsonify({'error': str(e)}), 409
+    except ValidationError as e:
+        return jsonify({'error': str(e)}), 400
 
 
 @user_bp.route('/users/<int:user_id>', methods=['PUT'])
@@ -39,11 +41,11 @@ def update_user(user_id):
         return jsonify(user), 200
     except PermissionError as e:
         return jsonify({'error': str(e)}), 403
-    except ValueError as e:
-        if 'não encontrado' in str(e):
-            return jsonify({'error': str(e)}), 404
-        if 'já cadastrado' in str(e):
-            return jsonify({'error': str(e)}), 409
+    except NotFoundError as e:
+        return jsonify({'error': str(e)}), 404
+    except ConflictError as e:
+        return jsonify({'error': str(e)}), 409
+    except ValidationError as e:
         return jsonify({'error': str(e)}), 400
 
 
@@ -54,7 +56,7 @@ def delete_user(user_id):
     try:
         UserController.delete(user_id)
         return jsonify({'message': 'Usuário deletado com sucesso'}), 200
-    except ValueError as e:
+    except NotFoundError as e:
         return jsonify({'error': str(e)}), 404
 
 
@@ -63,7 +65,7 @@ def delete_user(user_id):
 def get_user_tasks(user_id):
     try:
         return jsonify(UserController.get_tasks(user_id)), 200
-    except ValueError as e:
+    except NotFoundError as e:
         return jsonify({'error': str(e)}), 404
 
 
@@ -75,5 +77,5 @@ def login():
         return jsonify({'message': 'Login realizado com sucesso', **result}), 200
     except PermissionError as e:
         return jsonify({'error': str(e)}), 401
-    except ValueError as e:
+    except ValidationError as e:
         return jsonify({'error': str(e)}), 400

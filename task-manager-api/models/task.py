@@ -1,6 +1,6 @@
 from database import db
-from datetime import datetime
 from config import Config
+from utils.helpers import utcnow, DEFAULT_PRIORITY
 
 class Task(db.Model):
     __tablename__ = 'tasks'
@@ -9,11 +9,11 @@ class Task(db.Model):
     title = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text, nullable=True)
     status = db.Column(db.String(50), default='pending')
-    priority = db.Column(db.Integer, default=3)
+    priority = db.Column(db.Integer, default=DEFAULT_PRIORITY)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     category_id = db.Column(db.Integer, db.ForeignKey('categories.id'), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utcnow)
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
     due_date = db.Column(db.DateTime, nullable=True)
     tags = db.Column(db.String(500), nullable=True)
 
@@ -39,11 +39,11 @@ class Task(db.Model):
         return new_status in Config.VALID_TASK_STATUSES
 
     def validate_priority(self, p):
-        return 1 <= p <= 5
+        return Config.MIN_PRIORITY <= p <= Config.MAX_PRIORITY
 
     def is_overdue(self):
         if not self.due_date:
             return False
         if self.status in ('done', 'cancelled'):
             return False
-        return self.due_date < datetime.utcnow()
+        return self.due_date < utcnow()

@@ -1,6 +1,6 @@
 import smtplib
-from datetime import datetime
 from config import Config
+from utils.helpers import utcnow
 
 
 def _mask_email(email):
@@ -49,7 +49,7 @@ class NotificationService:
             'type': 'task_assigned',
             'user_id': user.id,
             'task_id': task.id,
-            'timestamp': datetime.utcnow()
+            'timestamp': utcnow()
         })
 
     def notify_task_overdue(self, user, task):

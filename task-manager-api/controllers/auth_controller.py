@@ -1,5 +1,6 @@
 from models.user import User
 from auth.tokens import generate_token
+from exceptions import ValidationError
 
 
 class AuthController:
@@ -7,7 +8,7 @@ class AuthController:
     @staticmethod
     def login(email, password):
         if not email or not password:
-            raise ValueError('Email e senha são obrigatórios')
+            raise ValidationError('Email e senha são obrigatórios')
 
         user = User.query.filter_by(email=email).first()
         if not user or not user.check_password(password):

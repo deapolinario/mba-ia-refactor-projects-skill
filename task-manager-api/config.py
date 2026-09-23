@@ -24,6 +24,13 @@ class Config:
     VALID_TASK_STATUSES = ['pending', 'in_progress', 'done', 'cancelled']
     VALID_ROLES = ['user', 'admin', 'manager']
 
+    # Domínio (v3.2 - centraliza a escala de prioridade, que antes era
+    # hardcoded/duplicada em models/task.py, utils/helpers.py e
+    # controllers/report_controller.py sem constante compartilhada)
+    MIN_PRIORITY = 1
+    MAX_PRIORITY = 5
+    PRIORITY_LABELS = {1: 'critical', 2: 'high', 3: 'medium', 4: 'low', 5: 'minimal'}
+
     @staticmethod
     def validate():
         if not os.getenv('SECRET_KEY') and os.getenv('FLASK_ENV') == 'production':

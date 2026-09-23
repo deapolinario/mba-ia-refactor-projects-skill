@@ -1,7 +1,24 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 import uuid
 from config import Config
+
+# v2.2: VALID_STATUSES/VALID_ROLES removidos daqui — centralizados em
+# Config.VALID_TASK_STATUSES/Config.VALID_ROLES (eram definidos aqui mas
+# nunca importados; código duplicava as listas hardcoded em outros arquivos)
+MAX_TITLE_LENGTH = 200
+MIN_TITLE_LENGTH = 3
+MIN_PASSWORD_LENGTH = 4
+DEFAULT_PRIORITY = 3
+DEFAULT_COLOR = '#000000'
+
+def utcnow():
+    """Substitui datetime.utcnow() (deprecated desde Python 3.12). Retorna
+    datetime 'naive' (sem tzinfo) de propósito: as colunas db.DateTime e os
+    valores de due_date parseados por parse_date() também são naive, então
+    devolver um aware aqui quebraria comparações (`due_date < utcnow()`)
+    com TypeError. O valor continua sendo UTC — só sem o tzinfo explícito."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 def format_date(date_obj):
     if date_obj:
@@ -25,7 +42,7 @@ def generate_id():
     return str(uuid.uuid4())
 
 def log_action(action, details=None):
-    timestamp = datetime.utcnow()
+    timestamp = utcnow()
     print(f"[{timestamp}] ACTION: {action}")
     if details:
         print(f"  DETAILS: {details}")
@@ -49,10 +66,10 @@ def process_task_data(data, existing_task=None):
         title = data['title']
         if title:
             title = title.strip()
-            if len(title) >= 3 and len(title) <= 200:
+            if MIN_TITLE_LENGTH <= len(title) <= MAX_TITLE_LENGTH:
                 result['title'] = title
             else:
-                return None, 'Título deve ter entre 3 e 200 caracteres'
+                return None, f'Título deve ter entre {MIN_TITLE_LENGTH} e {MAX_TITLE_LENGTH} caracteres'
         else:
             return None, 'Título não pode ser vazio'
 
@@ -70,10 +87,10 @@ def process_task_data(data, existing_task=None):
             p = int(data['priority'])
         except (ValueError, TypeError):
             return None, 'Prioridade inválida'
-        if 1 <= p <= 5:
+        if Config.MIN_PRIORITY <= p <= Config.MAX_PRIORITY:
             result['priority'] = p
         else:
-            return None, 'Prioridade deve ser entre 1 e 5'
+            return None, f'Prioridade deve ser entre {Config.MIN_PRIORITY} e {Config.MAX_PRIORITY}'
 
     if 'due_date' in data:
         if data['due_date']:
@@ -93,12 +110,3 @@ def process_task_data(data, existing_task=None):
             result['tags'] = tags
 
     return result, None
-
-# v2.2: VALID_STATUSES/VALID_ROLES removidos daqui — centralizados em
-# Config.VALID_TASK_STATUSES/Config.VALID_ROLES (eram definidos aqui mas
-# nunca importados; código duplicava as listas hardcoded em outros arquivos)
-MAX_TITLE_LENGTH = 200
-MIN_TITLE_LENGTH = 3
-MIN_PASSWORD_LENGTH = 4
-DEFAULT_PRIORITY = 3
-DEFAULT_COLOR = '#000000'

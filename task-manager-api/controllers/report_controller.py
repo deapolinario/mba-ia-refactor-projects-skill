@@ -1,10 +1,12 @@
 from sqlalchemy import func
-from datetime import datetime, timedelta
+from datetime import timedelta
 from database import db
+from config import Config
 from models.task import Task
 from models.user import User
 from models.category import Category
-from utils.helpers import format_date, calculate_percentage
+from utils.helpers import format_date, calculate_percentage, utcnow
+from exceptions import NotFoundError
 
 
 class ReportController:
@@ -26,7 +28,7 @@ class ReportController:
         all_tasks = Task.query.all()
         overdue_tasks = [t for t in all_tasks if t.is_overdue()]
 
-        seven_days_ago = datetime.utcnow() - timedelta(days=7)
+        seven_days_ago = utcnow() - timedelta(days=7)
         recent_tasks = Task.query.filter(Task.created_at >= seven_days_ago).count()
         recent_done = Task.query.filter(
             Task.status == 'done', Task.updated_at >= seven_days_ago
@@ -57,7 +59,7 @@ class ReportController:
             })
 
         return {
-            'generated_at': format_date(datetime.utcnow()),
+            'generated_at': format_date(utcnow()),
             'overview': {
                 'total_tasks': total_tasks,
                 'total_users': total_users,
@@ -70,11 +72,8 @@ class ReportController:
                 'cancelled': status_counts.get('cancelled', 0),
             },
             'tasks_by_priority': {
-                'critical': priority_counts.get(1, 0),
-                'high': priority_counts.get(2, 0),
-                'medium': priority_counts.get(3, 0),
-                'low': priority_counts.get(4, 0),
-                'minimal': priority_counts.get(5, 0),
+                label: priority_counts.get(num, 0)
+                for num, label in Config.PRIORITY_LABELS.items()
             },
             'overdue': {
                 'count': len(overdue_tasks),
@@ -83,7 +82,7 @@ class ReportController:
                         'id': t.id,
                         'title': t.title,
                         'due_date': format_date(t.due_date),
-                        'days_overdue': (datetime.utcnow() - t.due_date).days
+                        'days_overdue': (utcnow() - t.due_date).days
                     }
                     for t in overdue_tasks
                 ],
@@ -96,10 +95,12 @@ class ReportController:
         }
 
     @staticmethod
-    def user_report(user_id):
+    def user_report(user_id, requester):
+        if requester.id != user_id and requester.role not in ('admin', 'manager'):
+            raise PermissionError('Você só pode ver o relatório da sua própria conta')
         user = User.query.get(user_id)
         if not user:
-            raise ValueError('Usuário não encontrado')
+            raise NotFoundError('Usuário não encontrado')
 
         tasks = Task.query.filter_by(user_id=user_id).all()
         total = len(tasks)
@@ -110,7 +111,7 @@ class ReportController:
         high_priority = 0
         for t in tasks:
             status_counts[t.status] = status_counts.get(t.status, 0) + 1
-            if t.priority <= 2:
+            if t.priority <= Config.MIN_PRIORITY + 1:
                 high_priority += 1
             if t.is_overdue():
                 overdue += 1

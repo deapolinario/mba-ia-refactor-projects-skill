@@ -3,7 +3,8 @@ from database import db
 from models.task import Task
 from models.user import User
 from models.category import Category
-from utils.helpers import process_task_data
+from utils.helpers import process_task_data, DEFAULT_PRIORITY
+from exceptions import NotFoundError, ValidationError
 
 
 def _task_to_dict_with_relations(task):
@@ -31,33 +32,33 @@ class TaskController:
     def get_by_id(task_id):
         task = Task.query.options(joinedload(Task.user), joinedload(Task.category)).get(task_id)
         if not task:
-            raise ValueError('Task não encontrada')
+            raise NotFoundError('Task não encontrada')
         return _task_to_dict_with_relations(task)
 
     @staticmethod
     def create(data):
         if not data:
-            raise ValueError('Dados inválidos')
+            raise ValidationError('Dados inválidos')
         if not data.get('title'):
-            raise ValueError('Título é obrigatório')
+            raise ValidationError('Título é obrigatório')
 
         validated, error = process_task_data(data)
         if error:
-            raise ValueError(error)
+            raise ValidationError(error)
 
         user_id = data.get('user_id')
         if user_id and not User.query.get(user_id):
-            raise ValueError('Usuário não encontrado')
+            raise NotFoundError('Usuário não encontrado')
 
         category_id = data.get('category_id')
         if category_id and not Category.query.get(category_id):
-            raise ValueError('Categoria não encontrada')
+            raise NotFoundError('Categoria não encontrada')
 
         task = Task()
         task.title = validated.get('title')
         task.description = validated.get('description', '')
         task.status = validated.get('status', 'pending')
-        task.priority = validated.get('priority', 3)
+        task.priority = validated.get('priority', DEFAULT_PRIORITY)
         task.user_id = user_id
         task.category_id = category_id
         task.due_date = validated.get('due_date')
@@ -68,25 +69,27 @@ class TaskController:
         return task.to_dict()
 
     @staticmethod
-    def update(task_id, data):
+    def update(task_id, data, requester):
         task = Task.query.get(task_id)
         if not task:
-            raise ValueError('Task não encontrada')
+            raise NotFoundError('Task não encontrada')
+        if task.user_id != requester.id and requester.role not in ('admin', 'manager'):
+            raise PermissionError('Você só pode editar suas próprias tasks')
         if not data:
-            raise ValueError('Dados inválidos')
+            raise ValidationError('Dados inválidos')
 
         validated, error = process_task_data(data, existing_task=task)
         if error:
-            raise ValueError(error)
+            raise ValidationError(error)
 
         if 'user_id' in data:
             if data['user_id'] and not User.query.get(data['user_id']):
-                raise ValueError('Usuário não encontrado')
+                raise NotFoundError('Usuário não encontrado')
             task.user_id = data['user_id']
 
         if 'category_id' in data:
             if data['category_id'] and not Category.query.get(data['category_id']):
-                raise ValueError('Categoria não encontrada')
+                raise NotFoundError('Categoria não encontrada')
             task.category_id = data['category_id']
 
         for field in ('title', 'description', 'status', 'priority', 'due_date', 'tags'):
@@ -97,10 +100,12 @@ class TaskController:
         return task.to_dict()
 
     @staticmethod
-    def delete(task_id):
+    def delete(task_id, requester):
         task = Task.query.get(task_id)
         if not task:
-            raise ValueError('Task não encontrada')
+            raise NotFoundError('Task não encontrada')
+        if task.user_id != requester.id and requester.role not in ('admin', 'manager'):
+            raise PermissionError('Você só pode deletar suas próprias tasks')
         db.session.delete(task)
         db.session.commit()
 

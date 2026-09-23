@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from controllers.category_controller import CategoryController
 from middleware.auth import login_required, role_required
+from exceptions import NotFoundError, ValidationError
 
 category_bp = Blueprint('categories', __name__)
 
@@ -17,7 +18,7 @@ def create_category():
     try:
         category = CategoryController.create(request.get_json())
         return jsonify(category), 201
-    except ValueError as e:
+    except ValidationError as e:
         return jsonify({'error': str(e)}), 400
 
 
@@ -28,9 +29,10 @@ def update_category(cat_id):
     try:
         category = CategoryController.update(cat_id, request.get_json())
         return jsonify(category), 200
-    except ValueError as e:
-        status = 404 if 'não encontrada' in str(e) else 400
-        return jsonify({'error': str(e)}), status
+    except NotFoundError as e:
+        return jsonify({'error': str(e)}), 404
+    except ValidationError as e:
+        return jsonify({'error': str(e)}), 400
 
 
 @category_bp.route('/categories/<int:cat_id>', methods=['DELETE'])
@@ -40,5 +42,5 @@ def delete_category(cat_id):
     try:
         CategoryController.delete(cat_id)
         return jsonify({'message': 'Categoria deletada'}), 200
-    except ValueError as e:
+    except NotFoundError as e:
         return jsonify({'error': str(e)}), 404

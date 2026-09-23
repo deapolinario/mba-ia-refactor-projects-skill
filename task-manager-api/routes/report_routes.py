@@ -1,6 +1,7 @@
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, g
 from controllers.report_controller import ReportController
 from middleware.auth import login_required
+from exceptions import NotFoundError
 
 report_bp = Blueprint('reports', __name__)
 
@@ -15,6 +16,8 @@ def summary_report():
 @login_required
 def user_report(user_id):
     try:
-        return jsonify(ReportController.user_report(user_id)), 200
-    except ValueError as e:
+        return jsonify(ReportController.user_report(user_id, g.current_user)), 200
+    except PermissionError as e:
+        return jsonify({'error': str(e)}), 403
+    except NotFoundError as e:
         return jsonify({'error': str(e)}), 404

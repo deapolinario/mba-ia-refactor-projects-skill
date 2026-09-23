@@ -2,7 +2,8 @@ from database import db
 from models.user import User
 from models.task import Task
 from config import Config
-from utils.helpers import validate_email
+from utils.helpers import validate_email, MIN_PASSWORD_LENGTH
+from exceptions import NotFoundError, ConflictError, ValidationError
 
 
 class UserController:
@@ -15,7 +16,7 @@ class UserController:
     def get_by_id(user_id):
         user = User.query.get(user_id)
         if not user:
-            raise ValueError('Usuário não encontrado')
+            raise NotFoundError('Usuário não encontrado')
         data = user.to_dict()
         data['tasks'] = [t.to_dict() for t in user.tasks]
         return data
@@ -32,24 +33,24 @@ class UserController:
         existente (ver UserController.update).
         """
         if not data:
-            raise ValueError('Dados inválidos')
+            raise ValidationError('Dados inválidos')
 
         name = data.get('name')
         email = data.get('email')
         password = data.get('password')
 
         if not name:
-            raise ValueError('Nome é obrigatório')
+            raise ValidationError('Nome é obrigatório')
         if not email:
-            raise ValueError('Email é obrigatório')
+            raise ValidationError('Email é obrigatório')
         if not password:
-            raise ValueError('Senha é obrigatória')
+            raise ValidationError('Senha é obrigatória')
         if not validate_email(email):
-            raise ValueError('Email inválido')
-        if len(password) < 4:
-            raise ValueError('Senha deve ter no mínimo 4 caracteres')
+            raise ValidationError('Email inválido')
+        if len(password) < MIN_PASSWORD_LENGTH:
+            raise ValidationError(f'Senha deve ter no mínimo {MIN_PASSWORD_LENGTH} caracteres')
         if User.query.filter_by(email=email).first():
-            raise ValueError('Email já cadastrado')
+            raise ConflictError('Email já cadastrado')
 
         user = User()
         user.name = name
@@ -76,9 +77,9 @@ class UserController:
         """
         user = User.query.get(user_id)
         if not user:
-            raise ValueError('Usuário não encontrado')
+            raise NotFoundError('Usuário não encontrado')
         if not data:
-            raise ValueError('Dados inválidos')
+            raise ValidationError('Dados inválidos')
 
         is_self = requester.id == user_id
         is_admin = requester.role == 'admin'
@@ -94,20 +95,20 @@ class UserController:
 
         if 'email' in data:
             if not validate_email(data['email']):
-                raise ValueError('Email inválido')
+                raise ValidationError('Email inválido')
             existing = User.query.filter_by(email=data['email']).first()
             if existing and existing.id != user_id:
-                raise ValueError('Email já cadastrado')
+                raise ConflictError('Email já cadastrado')
             user.email = data['email']
 
         if 'password' in data:
-            if len(data['password']) < 4:
-                raise ValueError('Senha muito curta')
+            if len(data['password']) < MIN_PASSWORD_LENGTH:
+                raise ValidationError(f'Senha deve ter no mínimo {MIN_PASSWORD_LENGTH} caracteres')
             user.set_password(data['password'])
 
         if 'role' in data:
             if data['role'] not in Config.VALID_ROLES:
-                raise ValueError('Role inválido')
+                raise ValidationError('Role inválido')
             user.role = data['role']
 
         if 'active' in data:
@@ -120,7 +121,7 @@ class UserController:
     def delete(user_id):
         user = User.query.get(user_id)
         if not user:
-            raise ValueError('Usuário não encontrado')
+            raise NotFoundError('Usuário não encontrado')
         Task.query.filter_by(user_id=user_id).delete()
         db.session.delete(user)
         db.session.commit()
@@ -129,7 +130,7 @@ class UserController:
     def get_tasks(user_id):
         user = User.query.get(user_id)
         if not user:
-            raise ValueError('Usuário não encontrado')
+            raise NotFoundError('Usuário não encontrado')
         tasks = Task.query.filter_by(user_id=user_id).all()
         result = []
         for t in tasks:

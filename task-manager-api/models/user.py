@@ -1,6 +1,6 @@
 from database import db
-from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
+from utils.helpers import utcnow
 
 
 class User(db.Model):
@@ -12,7 +12,7 @@ class User(db.Model):
     password = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(50), default='user')
     active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utcnow)
 
     def to_dict(self):
         # v2.2: nunca incluir a senha (hash) na resposta — era exposta aqui

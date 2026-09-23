@@ -2,7 +2,8 @@ from sqlalchemy import func
 from database import db
 from models.category import Category
 from models.task import Task
-from utils.helpers import is_valid_color
+from utils.helpers import is_valid_color, DEFAULT_COLOR
+from exceptions import NotFoundError, ValidationError
 
 
 class CategoryController:
@@ -27,14 +28,14 @@ class CategoryController:
     @staticmethod
     def create(data):
         if not data:
-            raise ValueError('Dados inválidos')
+            raise ValidationError('Dados inválidos')
         name = data.get('name')
         if not name:
-            raise ValueError('Nome é obrigatório')
+            raise ValidationError('Nome é obrigatório')
 
-        color = data.get('color', '#000000')
+        color = data.get('color', DEFAULT_COLOR)
         if not is_valid_color(color):
-            raise ValueError('Cor inválida (formato esperado: #RRGGBB)')
+            raise ValidationError('Cor inválida (formato esperado: #RRGGBB)')
 
         category = Category()
         category.name = name
@@ -49,9 +50,9 @@ class CategoryController:
     def update(cat_id, data):
         category = Category.query.get(cat_id)
         if not category:
-            raise ValueError('Categoria não encontrada')
+            raise NotFoundError('Categoria não encontrada')
         if not data:
-            raise ValueError('Dados inválidos')
+            raise ValidationError('Dados inválidos')
 
         if 'name' in data:
             category.name = data['name']
@@ -59,7 +60,7 @@ class CategoryController:
             category.description = data['description']
         if 'color' in data:
             if not is_valid_color(data['color']):
-                raise ValueError('Cor inválida (formato esperado: #RRGGBB)')
+                raise ValidationError('Cor inválida (formato esperado: #RRGGBB)')
             category.color = data['color']
 
         db.session.commit()
@@ -69,6 +70,6 @@ class CategoryController:
     def delete(cat_id):
         category = Category.query.get(cat_id)
         if not category:
-            raise ValueError('Categoria não encontrada')
+            raise NotFoundError('Categoria não encontrada')
         db.session.delete(category)
         db.session.commit()
