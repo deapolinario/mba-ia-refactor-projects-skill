@@ -10,7 +10,7 @@
 
 **Mudança de princípio em v3.1:** a self-verification da v3.0 provou ser insuficiente contra um tipo específico de achado — no task-manager-api, o ciclo 1 declarou 0 achados relendo o código e confirmando que toda rota sensível tinha `@login_required`/`@role_required`, mas isso é uma checagem **estrutural** (o decorator existe?). Uma reauditoria seguinte, testando a lógica de autorização **funcionalmente** com um usuário de baixo privilégio, encontrou 2 CRITICAL de escalação de privilégio que a checagem estrutural nunca poderia pegar: `PUT /users/:id` tinha o decorator certo mas nenhuma checagem de "quem pode alterar o quê", e `POST /users` (cadastro público) aceitava `role` do payload sem restrição. v3.1 adiciona o Padrão 19 (Autorização Granular) ao catálogo e, mais importante, torna esse teste funcional — não só estrutural — parte obrigatória do self-verification (Fase 3, passo 7).
 
-**Mudança de princípio em v3.2:** o catálogo cobria segurança e arquitetura, mas não uso de **APIs deprecated/obsoletas** — categoria explicitamente exigida pelo enunciado do desafio. O efeito apareceu na prática: `datetime.utcnow()` (deprecated desde Python 3.12, retorna datetime naive) é usado 15 vezes em `models/task.py` no task-manager-api e não foi apontado em nenhuma auditoria anterior, porque nenhum item do checklist da Fase 2 procurava por isso — o código "funciona", então passava despercebido. v3.2 adiciona o Padrão 20 (APIs Deprecated) ao catálogo e ao checklist explícito da Fase 2 (categoria MEDIUM).
+**Mudança de princípio em v3.2:** o catálogo cobria segurança e arquitetura, mas não uso de **APIs deprecated/obsoletas** — categoria explicitamente exigida pelo enunciado do desafio, para qualquer API obsoleta em qualquer linguagem, não um caso específico. O gap apareceu na prática: `datetime.utcnow()` (deprecated desde Python 3.12, retorna datetime naive) é usado 15 vezes em `models/task.py` no task-manager-api e não foi apontado em nenhuma auditoria anterior, porque nenhum item do checklist da Fase 2 procurava por depreciação — o código "funciona", então passava despercebido. v3.2 adiciona o Padrão 20 (APIs Deprecated) ao catálogo como um **princípio geral de detecção** (qualquer API que a documentação oficial da stack em uso marca como deprecated, aplicando conhecimento da linguagem/framework detectados na Fase 1 — não uma lista fechada de exemplos) e ao checklist explícito da Fase 2 (categoria MEDIUM, escalando para HIGH quando a API deprecated também carrega um bug de correção/segurança).
 
 ---
 
@@ -79,7 +79,7 @@ DB tables:      [LISTA]
    - Secrets Expostas em Responses
    - Logs Sensíveis (PII exposure)
    - Exception Detail Leakage (`str(e)` retornado ao cliente)
-   - APIs Deprecated/Obsoletas (ex: `datetime.utcnow()`, `new Buffer()`, `crypto.createCipher()` — ver Padrão 20)
+   - APIs Deprecated/Obsoletas — qualquer função/método/módulo oficialmente marcado como deprecated pela linguagem/framework/biblioteca detectada na Fase 1, na versão em uso pelo projeto (não se limita a um exemplo específico; aplicar conhecimento da stack identificada, não só os exemplos listados — ver Padrão 20)
    
    **LOW:**
    - Magic Strings / Magic Numbers
@@ -195,9 +195,9 @@ Total findings: X (X CRITICAL, X HIGH)
    - Ver Padrão 17 em `refactoring-playbook.md`
 
    **MEDIUM - APIs Deprecated/Obsoletas:**
-   - Substituir cada chamada pelo equivalente moderno indicado no Padrão 20 (`anti-patterns-catalog.md`)
-   - `datetime.utcnow()` → `datetime.now(timezone.utc)` (aplicar em TODAS as ocorrências, grep pelo nome do método no projeto inteiro, não só a primeira)
-   - Ver Padrão 22 em `refactoring-playbook.md`
+   - Para cada API deprecated identificada (qualquer uma, não só as listadas como exemplo no catálogo): consultar a documentação oficial da versão em uso para o substituto indicado na própria mensagem/aviso de depreciação
+   - Aplicar a substituição em TODAS as ocorrências (grep pelo nome do método/módulo no projeto inteiro, não só a primeira)
+   - Ver Padrão 20 em `anti-patterns-catalog.md` e Padrão 22 em `refactoring-playbook.md` (exemplos multi-linguagem)
 
    **LOW - Configuração Morta:**
    - Após criar qualquer `Config.X`, grep pelo literal antigo no projeto inteiro e substituir todas as ocorrências
@@ -377,7 +377,7 @@ Validation:
 - Logs Sensíveis (PII)
 - Exception Detail Leakage (`str(e)` na response)
 - DEBUG Mode Ativo
-- APIs Deprecated/Obsoletas (ex: `datetime.utcnow()` → `datetime.now(timezone.utc)`)
+- APIs Deprecated/Obsoletas (qualquer API marcada deprecated pela stack em uso — Python, Node.js, Java/Kotlin, PHP, Ruby, etc; ex: `datetime.utcnow()`, `mysql_*` do PHP, `each()` do Ruby)
 
 ✅ **LOW:**
 - Magic Strings / Magic Numbers

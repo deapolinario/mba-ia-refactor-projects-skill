@@ -369,42 +369,55 @@ Descoberto originalmente no task-manager-api: `PUT /users/:id` tinha `@login_req
 
 ### 20. Uso de APIs Deprecated / Obsoletas (MEDIUM, escala para HIGH se houver impacto de segurança ou correção)
 
-**Descrição:** Chamadas a funções, métodos ou módulos que o próprio runtime/framework/biblioteca marca como deprecated (aviso oficial de descontinuação, remoção planejada em versão futura, ou substituição documentada). Diferente de "código antigo que ainda funciona", uma API deprecated tem prazo de validade conhecido e frequentemente já carrega um bug sutil que motivou a depreciação (ex: `datetime.utcnow()` retorna datetime **naive**, sem timezone, o que causa bugs de comparação/serialização em sistemas que lidam com múltiplos fusos).
+**Descrição:** Chamadas a **qualquer** função, método, classe ou módulo que o próprio runtime/framework/biblioteca em uso marca oficialmente como deprecated (aviso de descontinuação, remoção planejada em versão futura, ou substituto documentado) — independente de linguagem, stack ou qual API específica é. Diferente de "código antigo que ainda funciona", uma API deprecated tem prazo de validade conhecido e frequentemente já carrega um bug sutil que motivou a depreciação.
 
-Descoberto originalmente no task-manager-api: `datetime.utcnow()` usado 15 vezes em `models/task.py` para gerar timestamps (`created_at`, `updated_at`, etc). Passou despercebido nas auditorias anteriores porque o código "funciona" — o problema não é um erro de execução, é uso de API oficialmente deprecated desde Python 3.12 (`DeprecationWarning: datetime.datetime.utcnow() is deprecated`).
+**Este padrão não é uma lista fechada.** O sinal de detecção é o *princípio* abaixo, não os exemplos — a IA deve aplicar conhecimento geral da linguagem/framework/versão identificados na Fase 1 (Análise de Projeto) para reconhecer QUALQUER API deprecated presente no código, mesmo que não conste nos exemplos deste catálogo. Os exemplos por linguagem servem só para calibrar o tipo de sinal a procurar.
 
-**Sinais de Detecção (por stack):**
+**Sinal de Detecção (princípio geral, agnóstico de linguagem):**
+- A API tem aviso oficial de depreciação na documentação da versão detectada em uso (`Deprecated since version X`, `@deprecated`, `#[deprecated]`, `@Deprecated`, etc — a sintaxe de anotação varia por linguagem, o sinal é o mesmo)
+- Chamar a API dispara um warning em tempo de execução/compilação (`DeprecationWarning` em Python, warning do compilador em Java/Kotlin, warning do linter em JS/TS, `E_DEPRECATED` em PHP, etc)
+- A API foi removida em uma versão major mais recente do que a que o projeto usa, mas ainda funciona na versão atual (janela de transição)
+- Ferramentas de lint/análise estática/gerenciador de pacotes da própria stack já sinalizam a chamada como obsoleta
+
+**Exemplos por linguagem (ilustrativos — não exaustivos; aplique o princípio acima a qualquer API não listada aqui):**
 
 *Python:*
-- `datetime.utcnow()` / `datetime.utcnow` → naive datetime, deprecated desde 3.12
-- `datetime.now()` sem argumento de timezone, quando o valor é tratado como UTC em outro ponto do código
-- `imp` (módulo) → substituído por `importlib`
-- `distutils` → removido no 3.12, substituído por `setuptools`/`packaging`
+- `datetime.utcnow()`/`datetime.utcnow` → naive datetime, deprecated desde 3.12, substituto: `datetime.now(timezone.utc)`
+- `imp` (módulo) → `importlib`
+- `distutils` → removido no 3.12, substituto: `setuptools`/`packaging`
 - `urllib2`/`urlparse` (Python 2) → `urllib.request`/`urllib.parse`
 - `optparse` → `argparse`
-- Qualquer chamada que dispare `DeprecationWarning`/`PendingDeprecationWarning` visível em execução com `-W error` ou nos testes
 
-*Node.js/JavaScript:*
+*Node.js/JavaScript/TypeScript:*
 - `new Buffer(...)` → `Buffer.from(...)`/`Buffer.alloc(...)`
-- `crypto.createCipher()`/`crypto.createDecipher()` → `crypto.createCipheriv()`/`crypto.createDecipheriv()`
+- `crypto.createCipher()`/`createDecipher()` → `createCipheriv()`/`createDecipheriv()`
 - `fs.exists()` → `fs.access()`
 - `new Date().getYear()` → `getFullYear()`
 - Dependência `request` (deprecated pelo mantenedor) → `axios`/`fetch` nativo
-- `util.isArray()`, `util.isNumber()` etc (removidos) → `Array.isArray()`, checagens nativas
+- `util.isArray()`/`util.isNumber()` (removidos) → `Array.isArray()`, checagens nativas
+- `React.createFactory`, `componentWillMount`/`componentWillReceiveProps` (React legacy lifecycle) → hooks/`componentDidMount`/`getDerivedStateFromProps`
 
-*Geral (qualquer linguagem):*
-- Comentário/anotação oficial `@deprecated` no código-fonte da lib usada
-- Changelog/docs da dependência com "Deprecated since version X" para o método chamado
-- Warning emitido em tempo de execução ou em `pip list --outdated`/`npm outdated` apontando API removida na próxima major
+*Java/Kotlin:*
+- `new Date(year, month, day)` (construtor deprecated desde Java 1.1) → `java.time.LocalDate`
+- `Thread.stop()`/`suspend()`/`resume()` → `Thread.interrupt()` + cooperação explícita
+- `javax.xml.bind` (JAXB, removido do JDK core desde Java 11) → dependência externa `jakarta.xml.bind`
+- Anotação `@Deprecated` presente na assinatura de um método da própria lib/framework usada pelo projeto
 
-**Padrão Moderno Recomendado (equivalentes):**
-- `datetime.utcnow()` → `datetime.now(timezone.utc)` (datetime **aware**, com tzinfo explícito)
-- `new Buffer(size)` → `Buffer.alloc(size)` / `Buffer.from(data)`
-- `crypto.createCipher(alg, pass)` → `crypto.createCipheriv(alg, key, iv)`
-- `imp.load_module(...)` → `importlib.import_module(...)`
-- Regra geral: consultar a documentação oficial da versão instalada da linguagem/lib para o substituto indicado na mensagem de depreciação, e aplicar o mesmo em todas as ocorrências (grep pelo nome do método/módulo no projeto inteiro, não corrigir só a primeira ocorrência)
+*PHP:*
+- `each()` (removido no PHP 8.0) → `foreach`
+- `create_function()` (removido no PHP 8.0) → closures/arrow functions
+- `mysql_*` (removido no PHP 7.0) → `mysqli_*`/PDO
+- `FILTER_SANITIZE_STRING` (deprecated no PHP 8.1) → `htmlspecialchars()`/validação explícita
 
-**Impacto:** Quebra garantida em upgrade futuro da linguagem/framework (a API é removida, não só avisada); no caso específico de datetime naive vs aware, bugs sutis de fuso horário que corrompem ordenação, expiração de tokens e comparação de timestamps — sem lançar exceção, então passam despercebidos em testes que não verificam timezone explicitamente.
+*Ruby:*
+- `URI.escape`/`URI.unescape` (removidos) → `ERB::Util.url_encode`/`CGI.escape`
+- `Fixnum`/`Bignum` (unificados em `Integer` desde Ruby 2.4) → `Integer`
+
+**Padrão Moderno Recomendado:** sempre consultar a documentação oficial da versão instalada da linguagem/lib para o substituto indicado na própria mensagem/aviso de depreciação (não adivinhar), e aplicar a substituição em **todas** as ocorrências (grep pelo nome do método/módulo no projeto inteiro — não corrigir só a primeira ocorrência encontrada).
+
+**Impacto:** Quebra garantida em upgrade futuro da linguagem/framework (a API é removida, não só avisada); frequentemente a API deprecated já carrega um bug conhecido que motivou a depreciação (ex: datetime naive causando bugs de timezone, `mysql_*` sem proteção contra SQL injection, `create_function()` com risco de code injection) — nesses casos o achado escala para HIGH, pois não é só dívida técnica futura, é um problema de correção/segurança presente.
+
+**Exemplo real (task-manager-api, v3.2):** `datetime.utcnow()` usado 15 vezes em `models/task.py` e outros arquivos para gerar timestamps. Passou despercebido em 3 auditorias anteriores porque nenhum item do checklist da Fase 2 procurava por APIs deprecated — o código "funciona", e o único sinal é um `DeprecationWarning` que não aparece a menos que se rode com `-W error` ou se leia a documentação da versão do Python em uso.
 
 ---
 

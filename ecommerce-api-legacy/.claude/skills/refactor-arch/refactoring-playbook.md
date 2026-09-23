@@ -828,7 +828,11 @@ def create_user():
 
 ## v3.2 — APIs Deprecated/Obsoletas
 
-### Padrão 22: Substituir `datetime.utcnow()` (e outras APIs deprecated) pelo Equivalente Moderno
+### Padrão 22: Substituir Qualquer API Deprecated pelo Equivalente Moderno da Stack
+
+O princípio é sempre o mesmo, independente de linguagem: identificar a API marcada como deprecated pela documentação oficial da versão em uso, e trocar por todas as ocorrências pelo substituto que a própria mensagem/aviso de depreciação indica. Os exemplos abaixo (Python, Node.js, PHP) ilustram o mesmo padrão de transformação em stacks diferentes — aplique o mesmo raciocínio a qualquer outra API deprecated encontrada, mesmo que não listada aqui (ex: Java, Kotlin, Ruby — ver `anti-patterns-catalog.md`, Padrão 20).
+
+**Exemplo 1 — Python (`datetime.utcnow()`):**
 
 **Problema:**
 ```python
@@ -861,7 +865,7 @@ class Task:
         self.updated_at = datetime.now(timezone.utc)  # ✅ idem
 ```
 
-**Outros exemplos do mesmo padrão (Node.js):**
+**Exemplo 2 — Node.js (`new Buffer()`, `crypto.createCipher()`):**
 ```javascript
 // Problema
 const buf = new Buffer(10);                      // ❌ deprecated
@@ -872,9 +876,22 @@ const buf = Buffer.alloc(10);                                   // ✅
 const cipher = crypto.createCipheriv('aes-192-cbc', key, iv);   // ✅ IV explícito
 ```
 
-**Por quê:** API deprecated tem remoção planejada — a migração adiada vira breaking change forçado num upgrade futuro de linguagem/runtime. No caso de `datetime.utcnow()`, o problema não é só "vai ser removida": um datetime naive já causa bugs silenciosos hoje (comparação com datetime aware lança `TypeError`, serialização não deixa claro que o valor é UTC, cálculo de expiração de token pode ficar incorreto se algum outro ponto do código assumir horário local).
+**Exemplo 3 — PHP (`mysql_*`, removido no PHP 7.0):**
+```php
+// Problema
+$conn = mysql_connect($host, $user, $pass);           // ❌ removido no PHP 7.0
+$result = mysql_query("SELECT * FROM users", $conn);  // ❌ idem, sem proteção contra SQL injection
 
-**Validação:** `grep -rn "utcnow()"` (Python) / `grep -rn "new Buffer(\|createCipher(\|createDecipher("` (Node.js) no projeto inteiro após a refatoração — confirmar que não sobrou nenhuma ocorrência, igual à validação do Padrão 19 (Config Morta) para literais antigos.
+// Solução
+$conn = new mysqli($host, $user, $pass, $db);
+$stmt = $conn->prepare("SELECT * FROM users WHERE id = ?");
+$stmt->bind_param("i", $id);
+$stmt->execute();
+```
+
+**Por quê:** API deprecated tem remoção planejada — a migração adiada vira breaking change forçado num upgrade futuro de linguagem/runtime. Frequentemente o problema não é só "vai ser removida": a API deprecated já carrega um bug ou risco hoje (datetime naive causa `TypeError` em comparação com aware e bugs de timezone; `mysql_*` não suporta prepared statements, facilitando SQL injection) — nesses casos a migração corrige um problema presente, não só previne um futuro.
+
+**Validação:** grep pelo nome da API deprecated (`utcnow()`, `new Buffer(`, `mysql_`, etc — o nome específico depende do achado) no projeto inteiro após a refatoração, confirmando que não sobrou nenhuma ocorrência — mesmo princípio de validação do Padrão 19 (Config Morta) para literais antigos.
 
 ---
 
