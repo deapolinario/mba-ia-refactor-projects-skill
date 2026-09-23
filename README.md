@@ -1,6 +1,6 @@
 # Refactor Architecture — Skill de Auditoria e Refatoração Automatizada
 
-Skill `refactor-arch` para Claude Code que analisa, audita e refatora codebases legadas para o padrão MVC, de forma agnóstica de tecnologia. Testada e validada em 3 projetos reais (2x Python/Flask, 1x Node.js/Express), com correção completa aplicada, commitada e **confirmada por reauditoria final independente com 0 achados nos 3** (v3.1, incluindo teste funcional de autorização).
+Skill `refactor-arch` para Claude Code que analisa, audita e refatora codebases legadas para o padrão MVC, de forma agnóstica de tecnologia. Testada e validada em 3 projetos reais (2x Python/Flask, 1x Node.js/Express), com correção completa aplicada e commitada, ao longo de 4 gerações do catálogo (v1.0 → v3.2). A v3.1 adicionou teste funcional de autorização e encontrou 2 CRITICAL de privilege escalation que checagem estrutural não pegava; a v3.2 adicionou detecção de APIs deprecated e, em reauditorias subsequentes com mais rigor, encontrou mais 3 achados reais (2 CRITICAL de IDOR/broken authentication, 1 MEDIUM de API deprecated de ORM) que haviam sobrevivido inclusive à self-verification funcional anterior — todos corrigidos e reverificados. **Estado final: 0 achados nos 3 projetos contra o catálogo v3.2 completo (20 anti-patterns).**
 
 > Este é o enunciado original do desafio: [`README_enunciado.md`](README_enunciado.md).
 
@@ -54,6 +54,8 @@ Antes de escrever qualquer linha da skill, os 3 projetos foram lidos e auditados
 | 2.10 | 🟠 HIGH | Error handling inconsistente | `AppManager.js:35-78` | Mistura `.send()`/`.json()` sem padrão |
 | 2.11 | 🟡 MEDIUM | Estado global mutável | `utils.js:9-10` | `globalCache`/`totalRevenue` compartilhados entre requests |
 | 2.12 | 🟡 MEDIUM | Log de dado sensível | `AppManager.js:45` | Número de cartão completo em `console.log` |
+| 2.13 | 🔵 LOW | Magic strings | `AppManager.js:46` | `cc.startsWith("4") ? "PAID" : "DENIED"` — regra de bandeira e status hardcoded, sem constante nomeada |
+| 2.14 | 🔵 LOW | Monolithic Architecture | projeto inteiro | Sem separação `models/`/`routes/`/`controllers` — tudo em 3 arquivos (`app.js`, `AppManager.js`, `utils.js`) |
 
 ### Projeto 3 — task-manager-api (Python/Flask, Task Manager)
 
@@ -69,8 +71,9 @@ Antes de escrever qualquer linha da skill, os 3 projetos foram lidos e auditados
 | 3.8 | 🟡 MEDIUM | DEBUG ativo | `app.py:34` | Mesma classe de risco do projeto 1 |
 | 3.9 | 🟡 MEDIUM | Estado global em service | `notification_service.py:6` | Lista de notificações compartilhada entre instâncias |
 | 3.10 | 🔵 LOW | Ternário desnecessário | `user.py:34-38` | `if/else` que poderia ser `return <condição>` |
+| 3.11 | 🔵 LOW | Magic strings | `models/task.py`, `routes/user_routes.py` | `VALID_STATUSES`/`VALID_ROLES` já centralizados em `helpers.py`, mas ignorados — listas de status/role continuam duplicadas hardcoded em outros arquivos |
 
-**Total documentado manualmente: 44 problemas** — mínimo de 5 por projeto (com pelo menos 1 CRITICAL/HIGH e 2 MEDIUM/LOW cada) confirmado nos 3.
+**Total documentado manualmente: 39 problemas** (14 no projeto 1, 14 no projeto 2, 11 no projeto 3) — em cada um dos 3 projetos: mínimo de 5 problemas, com pelo menos 1 CRITICAL/HIGH, 2 MEDIUM e 2 LOW, confirmado.
 
 **Padrões recorrentes entre os 3 projetos:** hardcoded secrets, senha sem hash adequado, God Class/Module, N+1 queries, estado global mutável — foi esse conjunto que orientou o catálogo inicial da skill.
 
@@ -95,20 +98,21 @@ O `SKILL.md` define 3 fases sequenciais (Análise → Auditoria → Refatoraçã
 
 ### Catálogo de anti-patterns: o que foi incluído e por quê
 
-O catálogo cresceu de **2 padrões** (v1.0, focado só em SQL Injection e secrets, para validar o esqueleto da skill) para **19 padrões** (v3.1), distribuídos assim:
+O catálogo cresceu de **2 padrões** (v1.0, focado só em SQL Injection e secrets, para validar o esqueleto da skill) para **20 padrões** (v3.2), distribuídos assim:
 
 | Severidade | Padrões |
 |---|---|
 | CRITICAL | SQL Injection, Hardcoded Secrets, Senhas em Texto Plano/Expostas, Dangerous Admin Endpoint, Broken Access Control, Privilege Escalation via Autorização Insuficiente |
 | HIGH | Weak Password Hashing, God Classes, N+1 Queries, Global State Mutável, Regressão de Refatoração |
-| MEDIUM | Code Duplication, Secrets em Responses, Logs Sensíveis, Exception Detail Leakage |
+| MEDIUM | Code Duplication, Secrets em Responses, Logs Sensíveis, Exception Detail Leakage, **APIs Deprecated/Obsoletas** |
 | LOW | Magic Strings, Ternários Desnecessários, Monolithic Architecture, Configuração Morta |
 
 Cada padrão novo entrou **por causa de um achado real** que a versão anterior da skill deixou passar — não por completude teórica. Alguns exemplos:
 
 - **Dangerous Admin Endpoint** e **Broken Access Control** (v2.2): a auditoria original não tinha detecção para o `POST /admin/query` do projeto 1 (executa SQL arbitrário) nem para rotas administrativas sem autenticação — apareciam nos projetos, mas a skill nunca reportava.
 - **Regressão de Refatoração** (v2.2): ao refatorar uma conexão global para Singleton no projeto 1, o próprio refactor introduziu um bug (setup de schema rodando em toda request, não só uma vez) — isso motivou uma checklist de regressão obrigatória na Fase 3.
-- **Privilege Escalation via Autorização Insuficiente** (v3.1): a mais recente. Uma reauditoria do projeto 3, já com todas as rotas sensíveis protegidas por `@login_required`, testou a lógica de autorização *dentro* dos controllers e encontrou que qualquer usuário comum conseguia se autopromover a admin via `PUT /users/:id` — porque presença do decorator não é o mesmo que autorização correta. Esse achado só é detectável testando funcionalmente, não relendo código, e por isso motivou uma mudança de processo (ver "Self-Verification Loop" abaixo), não só uma entrada no catálogo.
+- **Privilege Escalation via Autorização Insuficiente** (v3.1): uma reauditoria do projeto 3, já com todas as rotas sensíveis protegidas por `@login_required`, testou a lógica de autorização *dentro* dos controllers e encontrou que qualquer usuário comum conseguia se autopromover a admin via `PUT /users/:id` — porque presença do decorator não é o mesmo que autorização correta. Esse achado só é detectável testando funcionalmente, não relendo código, e por isso motivou uma mudança de processo (ver "Self-Verification Loop" abaixo), não só uma entrada no catálogo.
+- **APIs Deprecated/Obsoletas** (v3.2): o enunciado exige explicitamente essa detecção. O gap apareceu na prática — `datetime.utcnow()` (deprecated desde Python 3.12) era usado 15 vezes no projeto 3 sem que nenhuma auditoria anterior apontasse, porque nenhum item do catálogo procurava por isso. A primeira versão do padrão nasceu **específica demais** — a descrição e os sinais de detecção estavam organizados em torno do exemplo que a motivou (`datetime.utcnow()`, Python/Node.js), o que contradizia o próprio requisito de agnosticismo de linguagem. Reescrita após revisão: o padrão agora lidera com o **princípio de detecção** (qualquer API que a documentação oficial da stack detectada na Fase 1 marca como deprecated, aplicando conhecimento da linguagem/versão em uso) e trata os exemplos por linguagem (Python, Node.js, Java/Kotlin, PHP, Ruby) como ilustrações, não como lista fechada. Reexecutado sob o catálogo corrigido, o padrão encontrou um achado real e diferente do exemplo original: `Query.get()` do SQLAlchemy, confirmado deprecated na versão 2.0.54 instalada — prova de que a generalização funciona para APIs de framework/ORM, não só da stdlib.
 
 ### Como a skill se tornou agnóstica de tecnologia
 
@@ -126,6 +130,7 @@ Três decisões deliberadas:
 | A skill declarava sucesso confiando no próprio log de refatoração, mas relatórios de reauditoria seguidos encontravam problemas que o log não cobria | v3.0 adicionou o **Self-Verification Loop**: ao final da Fase 3, a skill relê o código do zero e reaplica a Fase 2, gerando um novo relatório. Se 0 achados, encerra; se houver achados, **pergunta ao usuário** se deve continuar corrigindo (nunca decide isso por conta própria), com limite de 3 ciclos |
 | Mesmo com o loop de v3.0, uma checagem só estrutural ("a rota tem o decorator de auth?") não pega falhas de autorização granular (ex: qualquer usuário logado podendo alterar o `role` de outro) | v3.1 tornou o self-verification também **funcional**: para todo endpoint de escrita com campos sensíveis, a skill agora simula requisições reais com um usuário de baixo privilégio e confirma que a escalação de privilégio falha |
 | Provar que a skill não é o único ambiente onde ela funciona | Skill copiada e testada em `.claude/skills/refactor-arch/` dentro dos 3 projetos individualmente (além da cópia central usada durante o desenvolvimento) |
+| Mesmo o teste funcional da v3.1 tinha um ponto cego: testava só o branch mais óbvio de um fluxo com múltiplos caminhos, não todos | Reauditorias v3.2 encontraram 2 casos reais desse tipo, em 2 projetos diferentes: `POST /tasks` (projeto 3) nunca recebeu a mesma checagem de ownership que `PUT`/`DELETE /tasks/:id` já tinham (a correção anterior consertou os endpoints "óbvios", mas não o de criação); o checkout do projeto 2 testava apenas o branch de cadastro novo, nunca o de usuário existente com senha errada/ausente — que aceitava qualquer coisa. Lição registrada no catálogo: corrigir um endpoint/branch nunca é evidência de que os irmãos dele também estão corretos — cada um precisa do próprio teste |
 
 ---
 
@@ -149,7 +154,7 @@ Os 3 relatórios batem com (e superam) o mínimo de 5 findings e pelo menos 1 CR
 |---|---|---|
 | **1 — code-smells-project** | 4 arquivos (`app.py`, `controllers.py`, `models.py`, `database.py`), monolítico, sem `config` | 17 arquivos em MVC: `app.py` (entry point), `config.py`, `database.py` (Singleton), `auth.py` (decorators `login_required`/`role_required`/`owner_or_role_required`, adicionado na correção v3.1 de broken access control), `models/{produto,usuario,pedido}.py`, `controllers/{produto,usuario,pedido}_controller.py`, `routes/{produto,usuario,pedido,health}_routes.py` |
 | **2 — ecommerce-api-legacy** | 3 arquivos (`app.js`, `AppManager.js` — 142 linhas de God Class, `utils.js`), callback hell | 17 arquivos em MVC: `app.js`, `config.js`, `database.js` (Promise wrapper), `middleware/auth.js`, `models/{course,user,enrollment,payment,auditLog,report}.js`, `controllers/{checkout,report,user}Controller.js`, `routes/{checkout,report,user}Routes.js`, `utils/mask.js` |
-| **3 — task-manager-api** | 15 arquivos parcialmente organizados (`models/`, `routes/` já existiam, mas sem `controllers/`; toda validação/lógica de negócio direto nas rotas) | 27 arquivos com camada de controllers adicionada, autenticação real (token assinado + `login_required`/`role_required`), N+1 eliminado, e um bug de autorização granular corrigido: `auth/tokens.py`, `middleware/auth.py`, `controllers/{auth,task,user,category,report}_controller.py`, `routes/category_routes.py` (nova, separada de `report_routes.py`) |
+| **3 — task-manager-api** | 15 arquivos parcialmente organizados (`models/`, `routes/` já existiam, mas sem `controllers/`; toda validação/lógica de negócio direto nas rotas) | 28 arquivos com camada de controllers adicionada, autenticação real (token assinado + `login_required`/`role_required`), N+1 eliminado, IDOR corrigido em todas as operações de escrita de tasks (create/update/delete), e `exceptions.py` (tipos de erro dedicados, substituindo dispatch por string-matching): `auth/tokens.py`, `middleware/auth.py`, `controllers/{auth,task,user,category,report}_controller.py`, `routes/category_routes.py` (nova, separada de `report_routes.py`) |
 
 ### Checklist de Validação (preenchido para os 3 projetos)
 
@@ -165,7 +170,7 @@ Os 3 relatórios batem com (e superam) o mínimo de 5 findings e pelo menos 1 CR
 - [x] Cada finding tem arquivo e linhas exatos
 - [x] Findings ordenados por severidade (CRITICAL → LOW)
 - [x] Mínimo de 5 findings identificados (14, 9 e 10 nos 3 projetos)
-- [x] Detecção de APIs deprecated incluída (avaliado — nenhuma ocorrência real nos 3 projetos, catálogo cobre o padrão)
+- [x] Detecção de APIs deprecated incluída (Padrão 20, v3.2) — encontrou ocorrências reais: `datetime.utcnow()` (15x, projeto 3) e, numa rodada posterior já com o padrão generalizado, `Query.get()` do SQLAlchemy (15x, também projeto 3); nenhuma ocorrência nos projetos 1 e 2
 - [x] Skill pausa e pede confirmação antes da Fase 3
 
 ### Fase 3 — Refatoração
@@ -214,17 +219,38 @@ POST /users {"role": "admin", ...} (cadastro público) -> 201, role retornado: '
 - **Node.js/Express (projeto 2):** os mesmos anti-patterns (SQL injection, secrets, N+1) precisaram de refatorações com sintaxe/idioma diferente (Promises em vez de exceções Python, `LEFT JOIN` via query builder em vez de SQLAlchemy `joinedload`), mas a **lógica de detecção e a estrutura MVC alvo foram as mesmas** — confirmando o agnosticismo pretendido.
 - **Achado mais valioso do processo:** o Self-Verification Loop (v3.0/v3.1) encontrou, ele mesmo, achados que a primeira versão da Fase 3 tinha deixado passar em todos os 3 projetos — uma regressão de performance introduzida pelo próprio refactor (projeto 1), um N+1 residual fora do escopo original (projeto 1), configuração morta copiada do código legado (projeto 2) e uma falha de escalação de privilégio (projeto 3). Isso indicou que "a skill terminou de refatorar" não é o mesmo que "a skill confirmou que o resultado está correto" — e motivou tornar a reauditoria uma etapa obrigatória, não um passo opcional.
 
-### Confirmação Final (Reauditoria Completa Pós-v3.1)
+### Reauditoria Pós-v3.1 (19 anti-patterns, antes do catálogo v3.2)
 
 Além do Self-Verification Loop embutido na Fase 3 (que já fechou em 0 achados ao final de cada refatoração), os 3 projetos foram submetidos a uma **reauditoria completa e independente**, com a skill `/refactor-arch` reinvocada do zero — relendo todo o código-fonte sem confiar em nenhum log de rodada anterior — contra os 19 anti-patterns do catálogo v3.1 e o teste funcional obrigatório de autorização (Padrão 19):
 
-| Projeto | Relatório final | CRITICAL | HIGH | MEDIUM | LOW | Teste funcional de autorização |
+| Projeto | Relatório | CRITICAL | HIGH | MEDIUM | LOW | Teste funcional de autorização |
 |---|---|---|---|---|---|---|
 | 1 — code-smells-project | `audit-code-smells-project-2026-09-20T16-00-05.md` | 0 | 0 | 0 | 0 | 29 asserções simuladas (anônimo/cliente/admin) — 29 PASS |
 | 2 — ecommerce-api-legacy | `audit-ecommerce-api-legacy-2026-09-20T19-03-12.md` | 0 | 0 | 0 | 0 | 6 asserções (incl. injeção de `role`/`is_admin`/`price` no payload) — 6 PASS |
 | 3 — task-manager-api | `audit-task-manager-api-2026-09-20T18-57-12.md` | 0 | 0 | 0 | 0 | 7 asserções (auto-promoção, edição de outro usuário, rotas admin-only) — 7 PASS |
 
-Nenhum dos 3 relatórios finais encontrou achado novo ou regressão. O relatório do projeto 3 registra ainda uma nota informativa (não classificada como achado): `TaskController` permite editar/excluir tasks de outro usuário sem checagem de propriedade — mantido de propósito, pois o domínio é um quadro de tarefas compartilhado (não há regra de "só posso editar minhas próprias tasks" no seed/README do projeto), diferente de `User`, que é sempre pessoal. Fica sinalizado para uma decisão de produto futura, não como bug.
+Nenhum dos 3 relatórios encontrou achado novo ou regressão contra o catálogo **da época**. Como a seção seguinte mostra, isso não significava que os projetos estavam livres de achados reais — só que o catálogo v3.1 (e a superfície de testes funcionais daquele momento) não cobria o que faltava.
+
+### Confirmação Final (Catálogo v3.2 — o que "0 achados" da v3.1 não tinha pego)
+
+A skill v3.2 adicionou o Padrão 20 (APIs Deprecated) e, em execuções subsequentes com mais rigor — testando cada endpoint/branch de escrita individualmente em vez de assumir que "irmãos" de um endpoint já corrigido também estavam corretos — encontrou **3 achados reais nos projetos 2 e 3**, todos invisíveis para a v3.1 apesar do "0 achados" acima:
+
+| Projeto | Achado | Severidade | Por que escapou da v3.1 |
+|---|---|---|---|
+| 3 — task-manager-api | `datetime.utcnow()` (15x) — API deprecated desde Python 3.12 | MEDIUM | Categoria inexistente no catálogo v3.1; motivou a criação do Padrão 20 |
+| 2 — ecommerce-api-legacy | Broken Authentication no checkout: senha nunca verificada para email já cadastrado, permitindo criar matrícula/pagamento em nome de qualquer usuário existente só sabendo o email | **CRITICAL** | O teste funcional v3.1 só cobria o branch de cadastro *novo* (`checkout sem senha → 400`); nunca testou o branch de usuário *existente* com senha incorreta |
+| 3 — task-manager-api | IDOR em `POST /tasks`: `PUT`/`DELETE` já validavam ownership desde a correção anterior, mas `create` nunca recebeu a mesma checagem — qualquer usuário criava tasks (incl. marcadas "done") em nome de outro | **CRITICAL** | A correção anterior tratou `update`/`delete` como "o problema resolvido" sem verificar se `create` tinha o mesmo gap |
+| 3 — task-manager-api | `Query.get()` do SQLAlchemy — confirmado deprecated (`DeprecationWarning`) na versão 2.0.54 instalada | MEDIUM | Só detectável aplicando o Padrão 20 generalizado com conhecimento da versão real da dependência, não com os exemplos fixos da primeira versão do padrão |
+
+Todos os 4 corrigidos, testados via requisições HTTP reais contra o servidor rodando (não só leitura estática do código) e revalidados por self-verification (0 achados novos em cada ciclo). Estado final, reconfirmado contra o catálogo v3.2 completo (20 anti-patterns):
+
+| Projeto | Relatório final | CRITICAL | HIGH | MEDIUM | LOW |
+|---|---|---|---|---|---|
+| 1 — code-smells-project | `audit-code-smells-project-2026-09-22T21-36-26.md` | 0 | 0 | 0 | 0 |
+| 2 — ecommerce-api-legacy | `audit-ecommerce-api-legacy-2026-09-22T21-42-55.md` | 0 | 0 | 0 | 0 |
+| 3 — task-manager-api | `audit-task-manager-api-2026-09-22T21-49-16.md` | 0 | 0 | 0 | 0 |
+
+**Lição registrada:** "0 achados" numa rodada nunca é uma garantia permanente — é uma afirmação sobre o catálogo e a profundidade de teste daquele momento específico. Duas vezes seguidas, aplicar mais rigor (um padrão novo, ou testar um branch que antes não tinha teste próprio) revelou problemas reais em projetos já dados como "confirmados". Por isso o registro deste README documenta as rodadas anteriores como histórico, não como fato apagado pela rodada seguinte — inclusive a nota anterior deste documento (já removida) que descrevia o acesso cross-user a tasks no projeto 3 como comportamento "mantido de propósito": era, na verdade, o mesmo gap de IDOR listado na tabela acima, e foi corrigido, não mantido.
 
 ---
 
