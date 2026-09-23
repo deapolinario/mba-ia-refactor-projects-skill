@@ -42,10 +42,10 @@ class ProdutoController:
             raise ValueError("Preço não pode ser negativo")
         if estoque < 0:
             raise ValueError("Estoque não pode ser negativo")
-        if len(nome) < 2:
-            raise ValueError("Nome muito curto")
-        if len(nome) > 200:
-            raise ValueError("Nome muito longo")
+        if len(nome) < Config.MIN_PRODUTO_NOME:
+            raise ValueError(f"Nome muito curto (mínimo {Config.MIN_PRODUTO_NOME} caracteres)")
+        if len(nome) > Config.MAX_PRODUTO_NOME:
+            raise ValueError(f"Nome muito longo (máximo {Config.MAX_PRODUTO_NOME} caracteres)")
 
         categoria = dados.get("categoria", "geral")
         if categoria not in Config.VALID_CATEGORIES:

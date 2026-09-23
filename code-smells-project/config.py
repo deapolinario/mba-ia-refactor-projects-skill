@@ -19,6 +19,17 @@ class Config:
     VALID_CATEGORIES = ["informatica", "moveis", "vestuario", "geral", "eletronicos", "livros"]
     VALID_ORDER_STATUSES = ["pendente", "aprovado", "enviado", "entregue", "cancelado"]
 
+    # Domínio (v3.2 - extraído de magic numbers em models/pedido.py e
+    # controllers/produto_controller.py)
+    MIN_PRODUTO_NOME = 2
+    MAX_PRODUTO_NOME = 200
+    # (limite de faturamento, percentual de desconto), avaliados em ordem
+    FAIXAS_DESCONTO = [
+        (10000, 0.10),
+        (5000, 0.05),
+        (1000, 0.02),
+    ]
+
     # Validação no startup
     @staticmethod
     def validate():

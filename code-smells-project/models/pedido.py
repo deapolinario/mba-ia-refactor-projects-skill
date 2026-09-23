@@ -1,4 +1,5 @@
 from database import get_db
+from config import Config
 from models.produto import decrementar_estoque
 
 
@@ -134,12 +135,10 @@ def relatorio_vendas():
     faturamento = row["faturamento"]
 
     desconto = 0
-    if faturamento > 10000:
-        desconto = faturamento * 0.1
-    elif faturamento > 5000:
-        desconto = faturamento * 0.05
-    elif faturamento > 1000:
-        desconto = faturamento * 0.02
+    for limite, percentual in Config.FAIXAS_DESCONTO:
+        if faturamento > limite:
+            desconto = faturamento * percentual
+            break
 
     return {
         "total_pedidos": total_pedidos,
