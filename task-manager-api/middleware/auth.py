@@ -1,5 +1,6 @@
 from functools import wraps
 from flask import request, jsonify, g
+from database import db
 from auth.tokens import verify_token
 from models.user import User
 
@@ -21,7 +22,7 @@ def login_required(f):
         if not user_id:
             return jsonify({'error': 'Token inválido ou expirado'}), 401
 
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         if not user or not user.active:
             return jsonify({'error': 'Usuário inválido ou inativo'}), 401
 

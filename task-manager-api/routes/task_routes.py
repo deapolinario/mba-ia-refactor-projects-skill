@@ -28,8 +28,10 @@ def get_task(task_id):
 @login_required
 def create_task():
     try:
-        task = TaskController.create(request.get_json())
+        task = TaskController.create(request.get_json(), g.current_user)
         return jsonify(task), 201
+    except PermissionError as e:
+        return jsonify({'error': str(e)}), 403
     except NotFoundError as e:
         return jsonify({'error': str(e)}), 404
     except ValidationError as e:

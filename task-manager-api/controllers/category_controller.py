@@ -48,7 +48,7 @@ class CategoryController:
 
     @staticmethod
     def update(cat_id, data):
-        category = Category.query.get(cat_id)
+        category = db.session.get(Category, cat_id)
         if not category:
             raise NotFoundError('Categoria não encontrada')
         if not data:
@@ -68,7 +68,7 @@ class CategoryController:
 
     @staticmethod
     def delete(cat_id):
-        category = Category.query.get(cat_id)
+        category = db.session.get(Category, cat_id)
         if not category:
             raise NotFoundError('Categoria não encontrada')
         db.session.delete(category)

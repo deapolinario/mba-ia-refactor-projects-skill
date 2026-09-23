@@ -14,7 +14,7 @@ class UserController:
 
     @staticmethod
     def get_by_id(user_id):
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         if not user:
             raise NotFoundError('Usuário não encontrado')
         data = user.to_dict()
@@ -75,7 +75,7 @@ class UserController:
         um). 'role'/'active' só podem ser alterados por admin, mesmo que o
         alvo seja o próprio usuário (evita autopromoção).
         """
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         if not user:
             raise NotFoundError('Usuário não encontrado')
         if not data:
@@ -119,7 +119,7 @@ class UserController:
 
     @staticmethod
     def delete(user_id):
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         if not user:
             raise NotFoundError('Usuário não encontrado')
         Task.query.filter_by(user_id=user_id).delete()
@@ -128,7 +128,7 @@ class UserController:
 
     @staticmethod
     def get_tasks(user_id):
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         if not user:
             raise NotFoundError('Usuário não encontrado')
         tasks = Task.query.filter_by(user_id=user_id).all()

@@ -98,7 +98,7 @@ class ReportController:
     def user_report(user_id, requester):
         if requester.id != user_id and requester.role not in ('admin', 'manager'):
             raise PermissionError('Você só pode ver o relatório da sua própria conta')
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         if not user:
             raise NotFoundError('Usuário não encontrado')
 

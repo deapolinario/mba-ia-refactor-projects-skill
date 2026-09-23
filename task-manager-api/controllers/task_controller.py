@@ -30,13 +30,16 @@ class TaskController:
 
     @staticmethod
     def get_by_id(task_id):
-        task = Task.query.options(joinedload(Task.user), joinedload(Task.category)).get(task_id)
+        task = db.session.get(
+            Task, task_id,
+            options=[joinedload(Task.user), joinedload(Task.category)]
+        )
         if not task:
             raise NotFoundError('Task não encontrada')
         return _task_to_dict_with_relations(task)
 
     @staticmethod
-    def create(data):
+    def create(data, requester):
         if not data:
             raise ValidationError('Dados inválidos')
         if not data.get('title'):
@@ -46,12 +49,14 @@ class TaskController:
         if error:
             raise ValidationError(error)
 
-        user_id = data.get('user_id')
-        if user_id and not User.query.get(user_id):
+        user_id = data.get('user_id', requester.id)
+        if user_id != requester.id and requester.role not in ('admin', 'manager'):
+            raise PermissionError('Você só pode criar tasks para si mesmo')
+        if user_id and not db.session.get(User, user_id):
             raise NotFoundError('Usuário não encontrado')
 
         category_id = data.get('category_id')
-        if category_id and not Category.query.get(category_id):
+        if category_id and not db.session.get(Category, category_id):
             raise NotFoundError('Categoria não encontrada')
 
         task = Task()
@@ -70,7 +75,7 @@ class TaskController:
 
     @staticmethod
     def update(task_id, data, requester):
-        task = Task.query.get(task_id)
+        task = db.session.get(Task, task_id)
         if not task:
             raise NotFoundError('Task não encontrada')
         if task.user_id != requester.id and requester.role not in ('admin', 'manager'):
@@ -83,12 +88,12 @@ class TaskController:
             raise ValidationError(error)
 
         if 'user_id' in data:
-            if data['user_id'] and not User.query.get(data['user_id']):
+            if data['user_id'] and not db.session.get(User, data['user_id']):
                 raise NotFoundError('Usuário não encontrado')
             task.user_id = data['user_id']
 
         if 'category_id' in data:
-            if data['category_id'] and not Category.query.get(data['category_id']):
+            if data['category_id'] and not db.session.get(Category, data['category_id']):
                 raise NotFoundError('Categoria não encontrada')
             task.category_id = data['category_id']
 
@@ -101,7 +106,7 @@ class TaskController:
 
     @staticmethod
     def delete(task_id, requester):
-        task = Task.query.get(task_id)
+        task = db.session.get(Task, task_id)
         if not task:
             raise NotFoundError('Task não encontrada')
         if task.user_id != requester.id and requester.role not in ('admin', 'manager'):

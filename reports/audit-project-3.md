@@ -69,3 +69,18 @@ Código relido do zero + checklist completo dos 20 anti-patterns reaplicado + te
 - ✅ `db.create_all()` + `seed.py`: executam sem erros (confirma que a mudança de `utcnow()` não quebrou a comparação naive/aware em `Task.is_overdue()`)
 - ✅ Servidor Flask inicia e responde em `/health`, `/`, `/login`, `/tasks`, `/reports/summary`, `/reports/user/<id>`, `/users`
 - ✅ Status HTTP corretos (400/403/404/409) após a migração para exceções tipadas
+
+---
+
+## RE-EXECUÇÃO 2026-09-22T21-45-52 — Novos Achados (Padrão 19 e 20)
+
+Uma re-auditoria anterior (2026-09-22T21-16-45) havia confirmado 0 achados. Esta rodada aplicou mais rigor — checar cada endpoint de escrita individualmente (lição do achado do ecommerce-api-legacy) e o Padrão 20 com conhecimento da versão real de cada dependência — e encontrou 2 novos achados:
+
+1. **[CRITICAL]** IDOR/Mass Assignment em `POST /tasks` — `PUT`/`DELETE /tasks/:id` já checavam ownership desde a rodada anterior, mas `TaskController.create` nunca recebeu `requester` e usava `user_id` direto do payload, sem checar dono. Confirmado por exploração real: Maria (usuária comum) criou tasks (incluindo uma já `done`) atribuídas a João, distorcendo `/reports/user/1`.
+2. **[MEDIUM]** `Query.get()` do SQLAlchemy — 15 ocorrências em 6 arquivos. Confirmado com `DeprecationWarning` real (SQLAlchemy 2.0.54: "Query.get() ... becomes a legacy construct in 2.0"). Achado relevante porque é um exemplo diferente do que originou o Padrão 20 (`datetime.utcnow()`), confirmando que a generalização do catálogo funciona para APIs de framework/ORM, não só da stdlib.
+
+Ambos corrigidos: ownership check adicionado em `TaskController.create` (mesmo padrão de `update`/`delete`); as 15 ocorrências de `Query.get()` substituídas por `db.session.get()` (incluindo a variante com `joinedload` via parâmetro `options=`).
+
+**Self-verification (ciclo 1): 0 achados novos.** Testado via requisições HTTP reais: exploit de criação bloqueado (403), override de admin funcional (201), todos os 15 pontos de `db.session.get()` exercitados sem erro, sem `DeprecationWarning` (`-W error::DeprecationWarning`).
+
+Relatórios: `audit-task-manager-api-2026-09-22T21-45-52.md` (Fase 2) e `audit-task-manager-api-2026-09-22T21-49-16.md` (self-verification).
