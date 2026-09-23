@@ -10,9 +10,10 @@ const { maskCardNumber } = require('../utils/mask');
 class ValidationError extends Error {}
 class NotFoundError extends Error {}
 class PaymentDeniedError extends Error {}
+class AuthenticationError extends Error {}
 
 async function checkout({ usr, eml, pwd, c_id, card }) {
-    if (!usr || !eml || !c_id || !card) {
+    if (!usr || !eml || !pwd || !c_id || !card) {
         throw new ValidationError('Bad Request');
     }
 
@@ -23,12 +24,17 @@ async function checkout({ usr, eml, pwd, c_id, card }) {
 
     let user = await userModel.findByEmail(eml);
     if (!user) {
-        if (!pwd) {
-            throw new ValidationError('Senha é obrigatória para novo cadastro');
-        }
         const hash = await bcrypt.hash(pwd, 10);
         const userId = await userModel.create(usr, eml, hash);
         user = { id: userId };
+    } else {
+        // v3.2 - fix de Broken Authentication: antes, `pwd` era ignorado
+        // para email já cadastrado, permitindo criar enrollment/payment em
+        // nome de qualquer usuário existente só conhecendo o email.
+        const senhaValida = await bcrypt.compare(pwd, user.pass);
+        if (!senhaValida) {
+            throw new AuthenticationError('Credenciais inválidas');
+        }
     }
 
     // v2.2: mascarar número de cartão em logs (era logado em texto plano)
@@ -48,4 +54,4 @@ async function checkout({ usr, eml, pwd, c_id, card }) {
     return { msg: 'Sucesso', enrollment_id: enrollmentId };
 }
 
-module.exports = { checkout, ValidationError, NotFoundError, PaymentDeniedError };
+module.exports = { checkout, ValidationError, NotFoundError, PaymentDeniedError, AuthenticationError };

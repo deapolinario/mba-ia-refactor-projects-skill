@@ -17,6 +17,9 @@ router.post('/api/checkout', async (req, res) => {
         if (err instanceof checkoutController.PaymentDeniedError) {
             return res.status(400).send(err.message);
         }
+        if (err instanceof checkoutController.AuthenticationError) {
+            return res.status(401).send(err.message);
+        }
         console.error('Erro no checkout:', err.message);
         res.status(500).send('Erro interno do servidor');
     }
