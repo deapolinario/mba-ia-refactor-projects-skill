@@ -58,7 +58,7 @@ cursor.execute(
 # Linha 68
 cursor.execute("DELETE FROM produtos WHERE id = " + str(id))
 
-# Linhas 155-161 (login)
+# Linha 110 (login)
 cursor.execute(
     "SELECT * FROM usuarios WHERE email = '" + email + "' AND senha = '" + senha + "'"
 )
@@ -74,33 +74,38 @@ cursor.execute(
 
 #### **2. Hardcoded Secrets**
 
-**Arquivo:** `app.py` (linha 7), `database.py` (linhas 75-83)
+**Arquivo:** `app.py`
+**Linhas:** 7
 
 ```python
-# app.py
 app.config["SECRET_KEY"] = "minha-chave-super-secreta-123"
-
-# database.py — seed com senhas em texto plano
-usuarios = [
-    ("Admin", "admin@loja.com", "admin123", "admin"),
-    ("João Silva", "joao@email.com", "123456", "cliente"),
-    ("Maria Santos", "maria@email.com", "senha123", "cliente"),
-]
 ```
 
-**Impacto:** Qualquer pessoa com acesso ao repositório falsifica sessões (`SECRET_KEY`) ou faz login como admin (`admin123` hardcoded e em texto plano).
+**Impacto:** Qualquer pessoa com acesso ao repositório falsifica sessões, tokens JWT, CSRF protection e integridade de cookies.
 
-**Refatoração Proposta:** `config.py` lendo de `os.getenv()`, `.env` com valores reais (gitignored), hash das senhas de seed com `werkzeug.security`.
+**Refatoração Proposta:** `config.py` lendo de `os.getenv()`, `.env` com valores reais (gitignored).
 
 ---
 
 #### **3. Passwords em Texto Plano**
 
-**Arquivo:** `models.py` (login e criação de usuário)
+**Arquivo:** `database.py` (dados iniciais) + `models.py` (armazenamento)
+**Linhas:** 76, 83
 
-**Descrição:** Senhas armazenadas e comparadas diretamente, sem hash algum (não é nem MD5/SHA1 fraco — é ausência total de hashing).
+```python
+# database.py linha 76
+("Admin", "admin@loja.com", "admin123", "admin"),
 
-**Impacto:** Vazamento do banco expõe credenciais de todos os usuários instantaneamente.
+# models.py linha 83 (armazenado como-é)
+cursor.executemany(
+    "INSERT INTO usuarios (nome, email, senha, tipo) VALUES (?, ?, ?, ?)",
+    usuarios
+)
+```
+
+**Descrição:** Senhas salvas em texto plano no banco de dados, sem hash algum (não é nem MD5/SHA1 fraco — é ausência total de hashing).
+
+**Impacto:** Vazamento do banco expõe credenciais de todos os usuários instantaneamente (reutilização de senhas em outros sites, acesso não autorizado a contas).
 
 **Refatoração Proposta:** `generate_password_hash`/`check_password_hash` (pbkdf2:sha256) no cadastro e login.
 
@@ -112,7 +117,8 @@ usuarios = [
 
 #### **4. God Class - models.py**
 
-**Arquivo:** `models.py` (315+ linhas)
+**Arquivo:** `models.py`
+**Linhas:** 1-315 (315 linhas totais)
 
 **Descrição:** Um único arquivo concentra queries SQL, validação, lógica de negócio e serialização para 4 domínios diferentes (produtos, usuários, pedidos, itens_pedido).
 
@@ -124,11 +130,26 @@ usuarios = [
 
 #### **5. N+1 Queries**
 
-**Arquivo:** `models.py` (listagem de pedidos e relatório de vendas)
+**Arquivo:** `models.py`
+**Linhas:** 187-199 (get_pedidos_usuario), 219-231 (get_todos_pedidos)
 
-**Descrição:** Loop com 1 query por item (pedidos de um usuário, itens de relatório) em vez de uma única query com JOIN.
+**Código Problemático:**
+```python
+# Linha 187-199
+for row in rows:
+    pedido = {...}
+    cursor2 = db.cursor()
+    cursor2.execute("SELECT * FROM itens_pedido WHERE pedido_id = " + str(row["id"]))
+    itens = cursor2.fetchall()
+    for item in itens:
+        cursor3 = db.cursor()
+        cursor3.execute("SELECT nome FROM produtos WHERE id = " + str(item["produto_id"]))
+        # ← Para cada pedido: +1 query de itens + N queries de produtos
+```
 
-**Impacto:** Performance degrada linearmente com o volume de dados.
+**Descrição:** Para cada pedido (N), fazem 1 query de itens + M queries de produtos. Resultado: 1 + N + (N*M) queries.
+
+**Impacto:** Performance degrada exponencialmente com o volume de dados (10 pedidos = 30+ queries; 100 pedidos = 300+ queries).
 
 **Refatoração Proposta:** Eager loading via `LEFT JOIN` + agrupamento em memória.
 
@@ -137,6 +158,16 @@ usuarios = [
 #### **6. Global State Mutável**
 
 **Arquivo:** `database.py`
+**Linhas:** 4, 8-10
+
+```python
+db_connection = None  # Variável global
+
+def get_db():
+    global db_connection
+    if db_connection is None:
+        db_connection = sqlite3.connect(db_path, check_same_thread=False)
+```
 
 **Descrição:** Conexão SQLite reaberta a cada request via `get_db()`, sem controle de concorrência (`check_same_thread=False` sem sincronização real).
 
@@ -152,7 +183,10 @@ usuarios = [
 
 #### **7. Code Duplication**
 
-**Descrição:** Lógica de serialização de produto/pedido duplicada em múltiplos endpoints (`to_dict` reimplementado a cada função).
+**Arquivo:** `models.py`
+**Linhas:** 187-199 vs 219-231
+
+**Descrição:** Lógica de serialização de produto/pedido duplicada em múltiplos endpoints (`to_dict` reimplementado a cada função) — `get_pedidos_usuario` (187-199) e `get_todos_pedidos` (219-231) constroem o mesmo dicionário de pedido de forma idêntica.
 
 **Refatoração Proposta:** Centralizar em métodos `to_dict()` por model.
 
@@ -160,15 +194,41 @@ usuarios = [
 
 #### **8. Secrets Expostas em Responses**
 
-**Arquivo:** `app.py` (`/health`)
+**Arquivo:** `controllers.py`
+**Linhas:** 276-290 (health_check)
 
-**Descrição:** Endpoint de health check retorna `SECRET_KEY`/config sensível no JSON de resposta.
+```python
+def health_check():
+    return jsonify({
+        "status": "ok",
+        "database": "connected",
+        "counts": {...},
+        "versao": "1.0.0",
+        "ambiente": "producao",
+        "db_path": "loja.db",
+        "debug": True,
+        "secret_key": "minha-chave-super-secreta-123"  # ❌ EXPÕE!
+    }), 200
+```
+
+**Descrição:** Endpoint `/health` retorna a SECRET_KEY em plaintext para qualquer pessoa.
 
 **Refatoração Proposta:** Retornar apenas `{"status": "ok", "versao": "..."}`.
 
 ---
 
 #### **9. Logs Sensíveis (PII Exposure)**
+
+**Arquivo:** `controllers.py`
+**Linhas:** 161, 179, 182, 208-210, 248-250
+
+```python
+# Linha 161
+print("Usuário criado: " + email)  # ← EXPÕE EMAIL
+
+# Linha 179
+print("Login bem-sucedido: " + email)  # ← EXPÕE EMAIL
+```
 
 **Descrição:** Emails e outros dados de usuário logados em texto plano via `print()`.
 
@@ -183,6 +243,7 @@ usuarios = [
 #### **10. Magic Strings**
 
 **Arquivo:** `controllers.py`
+**Linhas:** 52-54
 
 ```python
 categorias_validas = ["informatica", "moveis", "vestuario", "geral", "eletronicos", "livros"]
